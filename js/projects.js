@@ -154,14 +154,14 @@ class GitHubIssuesManager {
         // Determine the correct path to hub/repos.csv based on the script's location
         const scripts = document.getElementsByTagName('script');
         for (let script of scripts) {
-            if (script.src && script.src.includes('issues.js')) {
+            if (script.src && script.src.includes('/engine/js/projects.js')) {
                 const srcAttribute = script.getAttribute('src');
                 // If script src starts with ../js/ (from hub directory)
                 if (srcAttribute && srcAttribute.startsWith('../js/')) {
                     return 'repos.csv';
                 }
-                // If script src is js/issues.js (from projects directory)
-                else if (srcAttribute && srcAttribute === 'js/issues.js') {
+                // If script src is js/projects.js (from engine directory)
+                else if (srcAttribute && srcAttribute === 'js/projects.js') {
                     return 'hub/repos.csv';
                 }
                 break;
