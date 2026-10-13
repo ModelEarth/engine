@@ -1,0 +1,3535 @@
+/* GitHub Issues Manager Styles */
+
+/* Icons: material-icons (localsite's icon font) with class "mi", sized to the surrounding text like
+   the Font Awesome icons they replaced. i.mi outranks localsite's 30px .material-icons, while the
+   later context rules below (e.g. .issue-meta i) still set their own sizes. */
+i.mi {
+    font-size: 1.2em;
+    line-height: 1;
+    vertical-align: -0.2em;
+}
+.mi-spin {
+    animation: spin 1s linear infinite;
+}
+/* GitHub mark (no Material equivalent) */
+.mi-github {
+    display: inline-block;
+    width: 1em;
+    height: 1em;
+    vertical-align: -0.125em;
+}
+
+:root {
+    --primary-color: #0366d6;
+    --success-color: #28a745;
+    --danger-color: #dc3545;
+    --warning-color: #ffc107;
+    --info-color: #17a2b8;
+    --light-color: #f8f9fa;
+    --dark-color: #666;
+    --border-color: #e1e4e8;
+    --text-muted: #777;
+    --bg-overlay: rgba(0, 0, 0, 0.5);
+    --border-radius: 12px;
+    --box-shadow: 0 1px 3px rgba(27, 31, 35, 0.12), 0 8px 24px rgba(66, 74, 83, 0.12);
+    --transition: all 0.2s ease-in-out;
+    --token-clear-shared-color: #343434;
+}
+
+/* Dark theme support */
+.dark {
+    --primary-color: #fff;
+    --light-color: #21262d;
+    --dark-color: #444;
+    --border-color: #30363d;
+    --text-muted: #8b949e;
+    --bg-overlay: rgba(0, 0, 0, 0.8);
+    --token-clear-shared-color: #fff;
+}
+
+/* Refresh link styling */
+.refresh-link {
+    color: var(--primary-color);
+    text-decoration: none;
+    font-weight: 500;
+    transition: var(--transition);
+}
+
+.refresh-link:hover {
+    color: var(--primary-color);
+    text-decoration: underline;
+    opacity: 0.8;
+}
+
+/* Base Layout */
+.issues-header {
+    padding: 22px 32px 8px 32px;
+    border: 1px solid #ccc;
+    border-radius: var(--border-radius);
+    position: relative;
+    overflow: hidden;
+    container-type: inline-size;
+}
+.dark .issues-header {
+    background: none;
+    border: 1px solid #777;
+}
+.issues-header::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M 10 0 L 0 0 0 10" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="1"/></pattern></defs><rect width="100%" height="100%" fill="url(%23grid)"/></svg>');
+    opacity: 0.3;
+}
+
+.header-content {
+    position: relative;
+    z-index: 1;
+}
+
+.issues-header h1 {
+    margin: 0 0 0.5rem 0;
+    font-size: 2.5rem;
+    font-weight: 700;
+    colorX: white;
+}
+
+#gitAccountHeaderRow {
+    margin: 0;
+    font-size: 1.2rem;
+    opacity: 0.9;
+}
+
+#gitAccountHeaderRow a {
+    color: #137AD1;
+    text-decoration: none;
+    opacity: 1;
+}
+
+#gitAccountHeaderRow a:hover {
+    color: #0f67b0;
+    text-decoration: none;
+}
+.dark #gitAccountHeaderRow a {
+    color: #8fc2ff;
+}
+.dark #gitAccountHeaderRow a:hover {
+    color: #b8d8ff;
+}
+#gitAccountDisplay a,
+#gitAccountDisplay a:hover {
+    text-decoration: none;
+}
+
+#toggleTokenSection:hover {
+    color: inherit;
+}
+
+/* Plain ghost button on light backgrounds */
+.btn-nice.btn-white {
+    background: #fff;
+    box-shadow: none;
+    border: 1px solid #ccc;
+    color: #555 !important;
+}
+.btn-nice.btn-white:hover {
+    background: #f4f4f4;
+    border-color: #aaa;
+    color: #333 !important;
+}
+.dark .btn-nice.btn-white {
+    background: #2a2a2a;
+    border-color: #555;
+    color: #ccc !important;
+}
+.dark .btn-nice.btn-white:hover {
+    background: #333;
+    color: #eee !important;
+}
+
+/* Filters toggle beside View Projects: filters-only shows just the filters before the list is requested,
+   filters-hidden hides them while the list shows */
+#projectsSectionsContainer.filters-only > :not(.filters-holder) {
+    display: none !important;
+}
+#projectsSectionsContainer.filters-hidden > .filters-holder {
+    display: none;
+}
+#toggleProjectFilters.btn-nice {
+    margin-left: 8px;
+    padding-left: 8px;
+    padding-right: 8px;
+}
+#toggleProjectFilters .filter-icon {
+    display: block;
+}
+#toggleProjectFilters.btn-nice[aria-pressed="true"] {
+    border-color: #888;
+}
+
+/* Projects button always plain; token button plain when token exists */
+#toggleProjectsSection.btn-nice,
+#toggleProjectFilters.btn-nice,
+#toggleTokenSection.btn-nice.btn-plain {
+    background: transparent;
+    box-shadow: none;
+    border: 1px solid #ccc;
+    color: #555 !important;
+    opacity: 0.9;
+}
+#toggleProjectsSection.btn-nice:hover,
+#toggleProjectFilters.btn-nice:hover,
+#toggleTokenSection.btn-nice.btn-plain:hover {
+    background: #f4f4f4;
+    border-color: #aaa;
+    color: #333 !important;
+    opacity: 1;
+}
+.dark #toggleProjectsSection.btn-nice,
+.dark #toggleProjectFilters.btn-nice,
+.dark #toggleTokenSection.btn-nice.btn-plain {
+    border-color: #666;
+    color: #d6d6d6 !important;
+}
+.dark #toggleProjectsSection.btn-nice:hover,
+.dark #toggleProjectFilters.btn-nice:hover,
+.dark #toggleTokenSection.btn-nice.btn-plain:hover {
+    background: #333;
+    border-color: #888;
+    color: #fff !important;
+}
+
+.issues-header .subtitle-description {
+    margin: 0;
+    font-size: 1.2rem;
+    opacity: 0.9;
+}
+
+/* Header fullscreen button - hidden by default, shown in narrow view */
+.minimize-btn {
+    font-size: 42px;
+}
+
+.header-fullscreen-btn {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    color: #555 !important;
+    font-size: 30px;
+    cursor: pointer;
+    padding: 0.5rem;
+    border-radius: var(--border-radius);
+    transition: var(--transition);
+    z-index: 10;
+}
+
+.header-fullscreen-btn:hover {
+    transform: scale(1.1);
+}
+
+.dark .header-fullscreen-btn {
+    color: #bbb !important;
+}
+
+/* Header search button - positioned to the left of fullscreen button */
+.header-search-btn {
+    position: absolute;
+    top: 1rem;
+    right: 3.5rem; /* Position to the left of fullscreen button */
+    color: white !important;
+    font-size: 1.2rem;
+    cursor: pointer;
+    background: rgba(0, 0, 0, 0.2);
+    padding: 0.5rem;
+    border-radius: var(--border-radius);
+    transition: var(--transition);
+    z-index: 1000;
+}
+
+.header-search-btn:hover {
+    background: rgba(0, 0, 0, 0.4);
+    transform: scale(1.1);
+}
+
+/* Cache status section */
+.cache-status-section {
+    background: var(--light-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 0.75rem 1rem;
+    margin: 1rem 0;
+    text-align: center;
+    font-size: 0.85rem;
+    color: #2d3748 !important; /* Much darker text */
+}
+
+.cache-status {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.dark .cache-status-section {
+    border-color: var(--border-color);
+    color: #e2e8f0 !important; /* Much lighter text for dark theme */
+}
+
+/* Issue Actions Menu */
+.issue-actions-menu {
+    position: relative;
+    display: inline-block;
+    margin-left: auto;
+}
+
+.issue-menu-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0.75rem;
+    color: var(--text-muted);
+    border-radius: var(--border-radius);
+    transition: var(--transition);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    font-size: 1.1rem;
+}
+
+.issue-menu-btn:hover {
+    background: rgba(0, 0, 0, 0.1);
+    color: var(--primary-color);
+}
+
+.dark .issue-menu-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.issue-menu-dropdown {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    box-shadow: var(--box-shadow);
+    z-index: 1000;
+    min-width: 160px;
+    opacity: 0;
+    transform: translateY(-10px);
+    transition: var(--transition);
+    pointer-events: none;
+}
+
+.issue-menu-dropdown.show {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
+.dark .issue-menu-dropdown {
+    background: var(--dark-color);
+    border-color: var(--border-color);
+}
+
+.menu-item {
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: var(--transition);
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.9rem;
+    color: var(--dark-color);
+}
+
+.menu-item:last-child {
+    border-bottom: none;
+}
+
+.menu-item:hover {
+    background: var(--light-color);
+    color: var(--primary-color);
+}
+
+.dark .menu-item {
+    color: #eee;
+    border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+.dark .menu-item:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--primary-color);
+}
+
+.menu-item i {
+    min-width: 14px;
+    text-align: center;
+    font-size: 0.85rem;
+}
+
+/* Issue loading states */
+.issue-refreshing {
+    position: relative;
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+.issue-refresh-loader {
+    position: absolute;
+    top: 0.5rem;
+    right: 3rem;
+    color: var(--primary-color);
+    z-index: 10;
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+}
+
+.dark .issue-refresh-loader {
+    background: rgba(0, 0, 0, 0.9);
+}
+
+.issue-refresh-loader i {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.issues-header {
+    position: relative;
+}
+
+/* Authentication Section */
+.auth-section {
+    margin-top: 1rem;
+    position: relative;
+    z-index: 1;
+}
+
+.auth-input {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    align-items: flex-end; /* Changed from center to flex-end to align with input bottoms */
+}
+
+.auth-actions {
+    display: inline-flex;
+    gap: 0.18rem;
+    margin-top: 12px;
+    margin-bottom: 6px;
+    margin-left: 10px;
+    align-self: flex-end;
+    transform: translateY(7px);
+}
+
+.auth-input input {
+    width: 100%;
+    max-width: 250px;
+    padding: 0.5rem;
+    border-radius: var(--border-radius);
+    background: rgba(255, 255, 255, 0.1);
+    font-family: monospace;
+    border-color: #ccc !important;
+}
+#addTokenButton {
+    flex: 0 0 auto;
+}
+
+.config-label {
+    font-size: 0.85rem;
+    opacity: 0.9;
+    margin-bottom: 0;
+}
+
+.auth-input input::placeholder {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.auth-help {
+    font-size: 0.9rem;
+    opacity: 0.8;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+#tokenBenefitText {
+    align-items: center;
+    gap: 0.35rem;
+}
+#tokenBenefitText strong {
+    white-space: nowrap;
+}
+#tokenBenefitText .token-benefit-detail {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.auth-help a {
+    color: #ffd700;
+    text-decoration: none;
+}
+
+.auth-help a:hover {
+    text-decoration: underline;
+}
+
+/* Narrow header container adjustments (based on parent width, not viewport) */
+@container (max-width: 500px) {
+    .issues-header {
+        padding: 0px 0.65rem;
+    }
+
+    #gitAccountHeaderRow {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.35rem;
+    }
+
+    #gitAccountDisplay {
+        flex: 0 0 100%;
+        width: 100%;
+        min-width: 0;
+        order: -1;
+    }
+
+    #gitAccountDisplay a {
+        overflow-wrap: anywhere;
+    }
+
+    #closeTokenSectionBtn.close-token-btn,
+    .close-token-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-left: 4px;
+        flex: 0 0 auto;
+        order: 2;
+    }
+
+    #gitAccountHeaderRow.token-editor-open {
+        flex-wrap: nowrap;
+        align-items: flex-start;
+    }
+
+    #gitAccountHeaderRow.token-editor-open #gitAccountDisplay {
+        flex: 1 1 auto;
+        width: auto;
+        max-width: calc(100% - 18px);
+    }
+
+    #gitAccountHeaderRow.token-editor-open #closeTokenSectionBtn.close-token-btn {
+        margin-left: auto;
+        align-self: flex-start;
+    }
+
+    .auth-input {
+        align-items: stretch;
+        gap: 0;
+    }
+
+    .auth-input .config-field {
+        flex: 1 1 100% !important;
+        min-width: 0 !important;
+    }
+
+    .auth-input input,
+    #githubToken {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
+    }
+
+    .auth-actions {
+        margin-left: 0;
+        margin-top: 6px;
+        transform: none;
+        align-self: flex-start;
+        flex-wrap: wrap;
+    }
+
+    #tokenBenefitText {
+        flex-wrap: nowrap;
+        align-items: center;
+        gap: 0.25rem;
+    }
+
+    .instructions-content .note {
+        flex-wrap: wrap;
+    }
+
+    .instructions-content .note .note-text {
+        flex-basis: 100%;
+    }
+}
+
+@container (max-width: 300px) {
+    #tokenBenefitText strong {
+        display: inline;
+        flex-basis: auto;
+        margin: 0;
+    }
+
+    #tokenBenefitText .token-benefit-detail {
+        display: inline;
+        width: auto;
+    }
+}
+
+#clearToken {
+    color: var(--token-clear-shared-color);
+}
+
+.auth-instructions .view-steps-link {
+    display: none;
+}
+
+.auth-instructions {
+    margin-top: 6px;
+    position: relative;
+    z-index: 1;
+}
+
+.auth-instructions details {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: var(--border-radius);
+    padding: 0;
+}
+
+.auth-instructions summary {
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    font-weight: 500;
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    transition: var(--transition);
+    user-select: none;
+}
+.auth-instructions details[open] summary {
+    display: flex;
+}
+
+.auth-instructions summary span {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.auth-instructions summary:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.auth-instructions.compact-actions summary {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    align-items: flex-start;
+}
+
+.auth-instructions.compact-actions summary > span:first-child {
+    flex: 1 1 100%;
+}
+
+.auth-instructions.compact-actions .view-steps-link {
+    display: inline-flex;
+}
+.instructions-content ol {
+    margin: 1rem 0;
+    padding-left: 1rem;
+    margin-left: 1rem;
+    line-height: 1.6;
+}
+.instructions-content li {
+    margin: 0.5rem 0;
+    font-size: 0.95rem;
+}
+.instructions-content code {
+    background: rgba(255, 255, 255, 0.2);
+    padding: 0.2rem 0.4rem;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9rem;
+}
+.instructions-content .note {
+    background: rgba(255, 193, 7, 0.1);
+    border: 1px solid rgba(255, 193, 7, 0.3);
+    border-radius: var(--border-radius);
+    padding: 0.75rem 1rem;
+    margin-top: 1rem;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+}
+
+.instructions-content .note i,
+.instructions-content .note .material-icons {
+    margin-top: 0.1rem;
+    color: #ffd700;
+}
+
+.instructions-content .note .note-text {
+    min-width: 0;
+}
+
+/* Rate Limit Information */
+.rate-limit-info {
+    margin: 1rem 0;
+    padding: 0;
+}
+
+.rate-limit-warning {
+    background: linear-gradient(135deg, #ffc107, #ff9800);
+    color: #212529;
+    padding: 1rem 1rem;
+    border-radius: var(--border-radius);
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    box-shadow: var(--box-shadow);
+    border-left: 4px solid #ff6f00;
+}
+
+/* Stack rate limit warning vertically on narrow screens */
+@media (max-width: 768px) {
+    .rate-limit-warning {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+        text-align: left;
+    }
+    
+    .rate-limit-warning i {
+        align-self: flex-start;
+    }
+}
+
+.dark .rate-limit-warning {
+    background: linear-gradient(135deg, #d39e00, #cc8500);
+    color: #fff;
+}
+
+.rate-limit-warning i {
+    font-size: 1.2rem;
+    opacity: 0.9;
+}
+
+.rate-limit-warning strong {
+    font-weight: 600;
+}
+
+/* Rate limit info display (for informational purposes, not warning) */
+.rate-limit-info-display {
+    background: linear-gradient(135deg, #17a2b8, #007bff);
+    color: white;
+    padding: 1rem 1rem;
+    border-radius: var(--border-radius);
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    box-shadow: var(--box-shadow);
+    border-left: 4px solid #0056b3;
+}
+
+.dark .rate-limit-info-display {
+    background: linear-gradient(135deg, #138496, #0062cc);
+    color: #fff;
+}
+
+.rate-limit-info-display i {
+    font-size: 1.2rem;
+    opacity: 0.9;
+}
+
+.rate-limit-info-display strong {
+    font-weight: 600;
+}
+
+/* Rate limit content structure */
+.rate-limit-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.rate-limit-title {
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.rate-limit-details {
+    font-weight: normal;
+    font-size: 0.95rem;
+    opacity: 0.95;
+}
+
+/* Responsive behavior for both rate limit displays */
+@media (max-width: 768px) {
+    .rate-limit-warning,
+    .rate-limit-info-display {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+        text-align: left;
+    }
+    
+    .rate-limit-warning i,
+    .rate-limit-info-display i {
+        align-self: flex-start;
+    }
+    
+    /* On narrow screens, force vertical layout */
+    .rate-limit-content {
+        width: 100%;
+    }
+}
+
+/* Last Refresh Info */
+.last-refresh-info {
+    text-align: center;
+    margin-bottom: 1rem;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+.last-refresh-info .text-muted {
+    color: var(--text-muted);
+}
+
+/* Loading Overlay */
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--bg-overlay);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+    backdrop-filter: blur(4px);
+}
+
+/* Loading Content (inside issues container) */
+.loading-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    text-align: center;
+    color: var(--dark-color);
+}
+
+.loading-content .spinner {
+    width: 40px;
+    height: 40px;
+    margin: 0 auto 1rem;
+    border: 4px solid var(--light-color);
+    border-top: 4px solid var(--primary-color);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.loading-content .loading-progress {
+    width: 100%;
+    max-width: 300px;
+    height: 4px;
+    background: var(--light-color);
+    border-radius: 2px;
+    overflow: hidden;
+    margin: 1rem 0;
+}
+
+.loading-content .progress-bar {
+    height: 100%;
+    background: var(--primary-color);
+    border-radius: 2px;
+    transition: width 0.3s ease;
+    width: 0%;
+}
+
+.loading-content .loading-status {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    margin: 0.5rem 0 0 0;
+}
+
+/* Dark theme support for loading content */
+.dark .loading-content {
+    color: var(--dark-color);
+}
+
+.dark .loading-content .spinner {
+    border: 4px solid #30363d;
+    border-top: 4px solid var(--primary-color);
+}
+
+.dark .loading-content .loading-progress {
+    background: #30363d;
+}
+
+.projects-loading-spinner {
+    background: white;
+    padding: 2rem;
+    border-radius: var(--border-radius);
+    text-align: center;
+    box-shadow: var(--box-shadow);
+    min-width: 300px;
+}
+
+.spinner {
+    width: 40px;
+    height: 40px;
+    margin: 0 auto 1rem;
+    border: 4px solid var(--light-color);
+    border-top: 4px solid var(--primary-color);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.loading-progress {
+    width: 100%;
+    height: 4px;
+    background: var(--light-color);
+    border-radius: 2px;
+    overflow: hidden;
+    margin: 1rem 0;
+}
+
+.progress-bar {
+    height: 100%;
+    background: var(--primary-color);
+    border-radius: 2px;
+    transition: width 0.3s ease;
+    width: 0%;
+}
+
+.loading-status {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    margin: 0.5rem 0 0 0;
+}
+
+/* Filters Holder */
+.filters-holder {
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    margin-bottom: 1rem;
+    box-shadow: var(--box-shadow);
+    position: relative;
+    container-type: inline-size;
+}
+
+/* Ensure filters start hidden by default */
+#filtersSection {
+    display: none !important;
+    border-bottom-left-radius: var(--border-radius);
+    border-bottom-right-radius: var(--border-radius);
+}
+
+/* Only show when explicitly toggled */
+#filtersSection.show-filters {
+    display: block !important;
+    padding: 1rem;
+}
+
+.dark .filters-section {
+    background: var(--light-color);
+    border-color: var(--border-color);
+}
+
+/* Close button for collapsed filters */
+.filters-close-btn {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    background: none;
+    border: none;
+    font-size: 1.1rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: var(--border-radius);
+    transition: var(--transition);
+    z-index: 10;
+}
+
+.filters-close-btn:hover {
+    background: var(--light-color);
+    color: var(--dark-color);
+}
+
+.dark .filters-close-btn:hover {
+    background: #30363d;
+}
+
+/* More Filters button - commented out (now using header search button instead) */
+/*
+.more-filters-btn {
+    white-space: nowrap;
+    width: auto;
+    flex: none;
+    align-self: flex-start;
+}
+*/
+
+/* Clear All Filters button */
+.clear-filters-btn {
+    white-space: nowrap;
+    width: auto;
+    flex: none;
+    align-self: flex-start;
+    margin-left: 0.5rem;
+    background: var(--light-color);
+    color: var(--danger-color);
+    border: 1px solid var(--danger-color);
+    transition: var(--transition);
+}
+
+.clear-filters-btn:hover {
+    background: var(--danger-color);
+    color: white;
+}
+
+.dark .clear-filters-btn {
+    background: var(--light-color);
+    color: var(--danger-color);
+    border-color: var(--danger-color);
+}
+
+.dark .clear-filters-btn:hover {
+    background: var(--danger-color);
+    color: white;
+}
+
+/* Responsive filters - narrow container */
+@container (max-width: 768px) {
+    .filters-section {
+        padding: 1rem;
+        padding-right: 2.5rem; /* Make room for X button */
+    }
+    
+    /* Hide additional filters by default on narrow screens */
+    .additional-filters {
+        display: none;
+    }
+    
+    /* Show additional filters when search button opens filter section */
+    .filters-section.show-filters .additional-filters {
+        display: flex;
+    }
+    
+    /* Show More Filters button on narrow screens - commented out */
+    /*
+    .more-filters-btn {
+        display: inline-flex !important;
+        font-size: 0.8rem;
+        padding: 0.3rem 0.6rem;
+        white-space: nowrap;
+        min-width: auto;
+        width: auto;
+        flex: none;
+        flex-shrink: 0;
+        max-width: 120px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    */
+    
+    /* When filters are expanded, show additional filters and close button - commented out */
+    /*
+    .filters-section.expanded .additional-filters {
+        display: flex;
+    }
+    
+    .filters-section.expanded .filters-close-btn {
+        display: block !important;
+    }
+    */
+    
+    /* .filters-section.expanded .more-filters-btn {
+        display: none !important;
+    } */
+    
+    /* Adjust layout for narrow screens */
+    .filters-primary-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-wrap: nowrap;
+    }
+    
+    .filters-primary-row .filter-group:first-child {
+        flex: 1;
+        min-width: 120px;
+    }
+    
+    .filters-primary-row .filter-group:first-child .filter-select {
+        width: 100%;
+        min-width: 120px;
+        max-width: calc(100vw - 200px);
+    }
+    
+    /* This media query is now redundant with the 900px one above */
+    /* Keeping for any edge cases but content moved to 900px breakpoint */
+    
+    /* Ensure select dropdown arrow doesn't duplicate */
+    .filter-select {
+        /* Remove any potential duplicate arrows */
+        position: relative;
+        z-index: 1;
+    }
+    
+    .filter-select::-ms-expand {
+        display: none; /* Remove IE dropdown arrow */
+    }
+    
+    /* Debug floating elements - check for any absolutely positioned elements */
+    .filters-always-visible {
+        position: relative;
+        z-index: 2;
+    }
+    
+    /* Ensure FontAwesome icons in buttons don't overlap */
+    .filter-button i {
+        position: relative;
+        z-index: 1;
+    }
+    
+    /* Fix potential dropdown arrow conflicts */
+    .filter-button .mi:last-child {
+        margin-left: 0.25rem;
+    }
+    
+    /* Additional filters dropdown buttons */
+    .additional-filters .filter-button {
+        width: auto;
+        min-width: 140px;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+    
+    /* Allow additional filters to wrap to next line */
+    .filters-row .additional-filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        justify-content: flex-start;
+        width: 100%;
+        margin-top: 0.5rem;
+    }
+    
+    .filters-secondary-row {
+        margin-top: 1rem;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+    
+    /* Search container and group adjustments */
+    .search-container {
+        width: 95%;
+        margin: 0;
+    }
+    
+    .search-group {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        width: 100%;
+    }
+    
+    .search-group input {
+        flex: 1;
+        min-width: 100px;
+    }
+    
+    .search-group #searchButton {
+        flex-shrink: 0;
+        width: 38px;
+        height: 38px;
+    }
+    
+    /* View controls compact layout */
+    .view-controls {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        flex-shrink: 0;
+    }
+    
+}
+
+/* Specific range fix for repo filter width between 767px and 850px */
+@container (min-width: 600px) and (max-width: 850px) {
+    .filters-primary-row .filter-group:first-child .filter-select {
+        min-width: 200px !important;
+        width: auto !important;
+    }
+}
+
+/* Media query fallback for the range fix */
+@media (min-width: 600px) and (max-width: 850px) {
+    .filters-primary-row .filter-group:first-child .filter-select {
+        min-width: 200px !important;
+        width: auto !important;
+    }
+}
+
+/* Fallback for browsers without container queries */
+@media (max-width: 768px) {
+    .filters-section .additional-filters {
+        display: none;
+    }
+    
+    /* Show additional filters when search button opens filter section */
+    .filters-section.show-filters .additional-filters {
+        display: flex;
+    }
+    
+    /* .filters-section .more-filters-btn {
+        display: inline-flex !important;
+        width: auto;
+        flex: none;
+    } */
+    
+    .additional-filters .filter-button {
+        width: auto;
+        min-width: 140px;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+    
+    /* Allow additional filters to wrap in media query fallback */
+    .filters-row .additional-filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        justify-content: flex-start;
+        width: 100%;
+        margin-top: 0.5rem;
+    }
+    
+    /* .filters-section.expanded .additional-filters {
+        display: flex;
+    }
+    
+    .filters-section.expanded .filters-close-btn {
+        display: block !important;
+    } */
+    
+    /* .filters-section.expanded .more-filters-btn {
+        display: none !important;
+    } */
+}
+
+.filters-row {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+}
+
+.filters-row:last-child {
+    margin-bottom: 0;
+}
+
+/* Primary row (Row 1): Repository filter and Clear All Filters */
+.filters-primary-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    margin-right: 0.7rem;
+}
+
+.filters-primary-row .filter-group:first-child {
+    flex: 1;
+}
+
+.filters-primary-row .clear-filters-btn {
+    flex-shrink: 0;
+}
+
+/* Secondary row (Row 2): Filter buttons */
+.filters-secondary-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+}
+
+/* Make first two filter groups (assignee and sort) evenly spread */
+.filters-secondary-row .filter-group:nth-child(1),
+.filters-secondary-row .filter-group:nth-child(2) {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Keep the third filter group (clear cache) right-aligned */
+.filters-secondary-row .filter-group:nth-child(3) {
+    margin-left: auto;
+    flex: 0 0 auto;
+}
+
+/* Tertiary row (Row 3): Search */
+.filters-tertiary-row {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    margin-bottom: 0;
+    margin-right: 0.7rem;
+}
+
+.filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    position: relative;
+}
+
+.filter-group label {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--dark-color);
+}
+
+.filter-select {
+    padding: 0.5rem 2.5rem 0.5rem 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    background: white;
+    min-width: 180px;
+    font-size: 0.9rem;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6,9 12,15 18,9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat !important;
+    background-position: right 0.7rem center;
+    background-size: 1em;
+    transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+    box-sizing: border-box;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%; /* Ensure it doesn't exceed container */
+}
+
+.filter-select:hover {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 1px var(--primary-color);
+}
+
+.dark .filter-select {
+    background: var(--light-color);
+    color: var(--dark-color);
+    background-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23c9d1d9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6,9 12,15 18,9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat !important;
+    background-position: right 0.7rem center;
+    background-size: 1em;
+}
+
+.filter-button {
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.9rem;
+    transition: var(--transition);
+    width: 100%;
+    height: 100%;
+    justify-content: space-between;
+    white-space: nowrap;
+    box-sizing: border-box;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dark .filter-button {
+    background: var(--light-color);
+    color: var(--dark-color);
+}
+
+.filter-button:hover {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 1px var(--primary-color);
+}
+
+/* Dropdown Menus */
+.dropdown-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    box-shadow: var(--box-shadow);
+    z-index: 1000;
+    display: none;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+/* Fix dropdown positioning for second row compact filters */
+.filter-row-2 .filter-group {
+    position: relative;
+}
+
+.filter-row-2 .dropdown-menu {
+    left: 0;
+    right: auto;
+    min-width: 180px;
+    width: max-content;
+}
+
+.dark .dropdown-menu {
+    background: var(--light-color);
+}
+
+.dropdown-menu.show {
+    display: block;
+}
+
+.dropdown-item {
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    border-bottom: 1px solid var(--border-color);
+    transition: var(--transition);
+}
+
+.dropdown-item:last-child {
+    border-bottom: none;
+}
+
+.dropdown-item:hover {
+    background: var(--light-color);
+}
+
+.dark .dropdown-item:hover {
+    background: #30363d;
+}
+
+/* Search Container and Group */
+.search-container {
+    flex: 1;
+    display: flex;
+}
+
+.search-group {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    width: 100%;
+}
+
+.search-group input {
+    flex: 1;
+    padding: 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    font-size: 0.9rem;
+}
+
+.dark .search-group input {
+    background: var(--light-color);
+    color: var(--dark-color);
+}
+
+/* Search button - circular icon button */
+#searchButton, #clearSearch {
+    width: auto;
+    min-width: auto;
+    flex-shrink: 0;
+    margin: 0px !important;
+}
+
+#searchButton {
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
+    padding: 0;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* View Controls */
+.view-controls {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    justify-content: flex-start;
+}
+
+.view-toggle {
+    display: flex;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    overflow: hidden;
+}
+
+.view-btn {
+    background: white;
+    border: none;
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+    transition: var(--transition);
+    border-right: 1px solid var(--border-color);
+}
+
+.dark .view-btn {
+    background: var(--light-color);
+    color: #d7dde7;
+}
+
+.view-btn.active {
+    background: var(--primary-color);
+    color: white;
+}
+
+.view-btn .material-icons {
+    font-size: 18px;
+    line-height: 1;
+    vertical-align: middle;
+}
+
+.dark .view-btn.active {
+    background: #137AD1;
+    color: white;
+}
+
+.view-btn:hover:not(.active) {
+    background: var(--light-color);
+}
+
+/* Statistics Section */
+.stats-section {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 2rem;
+    flex-wrap: wrap;
+}
+
+.stat-card {
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex: 1;
+    min-width: 200px;
+    box-shadow: var(--box-shadow);
+    transition: var(--transition);
+}
+
+.dark .stat-card {
+    background: var(--light-color);
+}
+
+.stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(27, 31, 35, 0.15);
+}
+
+.stat-icon {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    color: white;
+    opacity: .6;
+}
+.dark .stat-icon {
+    opacity: .8;
+}
+.stat-card:hover .stat-icon {
+    opacity: .9;
+}
+.dark .stat-card:hover .stat-icon {
+    opacity: 1;
+}
+
+.stat-card:nth-child(1) .stat-icon { background: var(--info-color); }
+.stat-card:nth-child(2) .stat-icon { background: var(--success-color); }
+.stat-card:nth-child(3) .stat-icon { background: var(--danger-color); }
+.stat-card:nth-child(4) .stat-icon { background: var(--warning-color); }
+
+.stat-content {
+    flex: 1;
+}
+
+.stat-number {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #1f2937;
+    line-height: 1;
+}
+
+.dark .stat-number {
+    color: #d1d5db;
+}
+
+.stat-label {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+}
+
+/* Issues Container */
+.issues-container {
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    overflow: hidden;
+    box-shadow: var(--box-shadow);
+    margin-bottom: 15px;
+}
+
+.dark .issues-container {
+    background: var(--light-color);
+}
+
+/* Issues header bar with view controls */
+.issues-header-bar {
+    display: flex;
+    justify-content: flex-end;
+    padding: 1rem;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--light-color);
+}
+
+.dark .issues-header-bar {
+    background: #262c36;
+}
+
+/* Always visible filters row */
+.filters-always-visible {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 1rem;
+    container-type: inline-size;
+    border-radius: var(--border-radius);
+}
+
+/* Filter row styling */
+.filter-row-1,
+.filter-row-2 {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+    width: 100%;
+    height: 38px;
+}
+
+/* First row: 2 items */
+.filter-row-1 .view-controls {
+    height: 100%;
+    display: flex;
+    align-items: stretch;
+}
+
+.filter-row-1 .filter-group {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    display: flex;
+    align-items: stretch;
+}
+
+/* Second row: 4 items */
+.filter-row-2 .filter-group {
+    flex: 0 1 auto; /* size to content rather than stretching wide */
+    min-width: 0;
+    height: 100%;
+    display: flex;
+    align-items: stretch;
+    box-sizing: border-box;
+}
+
+.filter-row-2 .toggle-filters-btn,
+.filter-row-2 .clear-filters-btn {
+    flex: 0 1 auto;
+    width: auto;
+    max-width: 20%;
+    height: 100%;
+    display: flex;
+    align-items: stretch;
+    box-sizing: border-box;
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+}
+.filter-row-2 .toggle-filters-btn {
+    padding-left: 1rem;
+    padding-right: 1rem;
+}
+
+/* Narrow container adjustments for filters */
+@container (max-width: 500px) {
+    .filter-row-2 .toggle-filters-btn,
+    .filter-row-2 .clear-filters-btn {
+        max-width: 18%;
+        font-size: 0.7rem;
+        padding: 0.25rem 0.25rem;
+    }
+    .filter-row-2 .toggle-filters-btn {
+        padding-left: 0.55rem;
+        padding-right: 0.55rem;
+    }
+}
+
+/* Ensure all filter elements have consistent height and alignment */
+.filters-always-visible .filter-group,
+.filters-always-visible .toggle-filters-btn,
+.filters-always-visible .clear-filters-btn {
+    display: flex;
+    align-items: stretch;
+    height: 100%;
+    box-sizing: border-box;
+}
+
+/* Repo filter and assignee button layout - base styles for wide screens */
+.filters-always-visible .filter-group:first-child {
+    flex: 1 1 auto;
+}
+
+/* Assignee button next to repo filter */
+.filters-always-visible .filter-group:nth-child(2) {
+    flex: 1 1 auto;
+}
+
+/* Sort button can wrap to next line on narrow screens */
+.filters-always-visible .filter-group:nth-child(3) {
+    flex: 0 0 auto;
+}
+#repoFilter {
+    width: 100%;
+    flex: 1;
+}
+
+/* Keep core filter controls visually aligned */
+#repoFilter,
+#stateButton,
+#assigneeButton,
+#sortButton {
+    min-height: 38px;
+}
+
+/* Ensure repo select keeps native-style dropdown indicator space */
+#repoFilter {
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    padding-right: 2.25rem;
+    background-color: white;
+    background-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6,9 12,15 18,9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat !important;
+    background-position: right 0.75rem center !important;
+    background-size: 1em !important;
+}
+/* Force elements to fit on one line when needed - STRONGER CONSTRAINTS */
+@media (max-width: 1100px) {
+    .filters-always-visible {
+        flex-wrap: wrap !important;
+        display: flex !important;
+    }
+    
+    /* FORCE exact half-width behavior */
+    .filters-always-visible .filter-group:first-child,
+    .filters-always-visible .filter-group:nth-child(2) {
+        width: calc(50% - 0.5rem) !important;
+        box-sizing: border-box !important;
+    }
+    
+    /* FORCE the inner elements to respect container width */
+    .filters-always-visible .filter-group:first-child .filter-select,
+    .filters-always-visible .filter-group:nth-child(2) .filter-button {
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+        flex-shrink: 1 !important;
+    }
+    
+    /* Override any conflicting select styling */
+    .filters-always-visible .filter-group:first-child .filter-select {
+        padding-right: 2rem !important; /* Reduce right padding to fit arrow */
+    }
+    
+    .filters-always-visible .filter-group:nth-child(3) {
+        flex: 1 1 100% !important;
+        margin-top: 0.5rem;
+        width: 100% !important;
+    }
+}
+
+/* On very narrow screens, allow the sort button to take full width on new line */
+@media (max-width: 600px) {
+    .filters-always-visible {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.75rem;
+    }
+    
+    .filters-always-visible .filter-group {
+        width: 100%;
+    }
+    
+    .filters-always-visible .filter-group .filter-select,
+    .filters-always-visible .filter-group .filter-button {
+        width: 100%;
+    }
+}
+
+/* Additional responsive behavior for three-element layout */
+@media (max-width: 600px) {
+    .filters-always-visible {
+        flex-wrap: wrap;
+    }
+
+    /* Override the base min-widths to allow proper half-width behavior */
+    .filters-always-visible .filter-group:nth-child(2) {
+        flex: 1 1 calc(50% - 0.5rem);
+        min-width: calc(50% - 0.5rem);
+        max-width: calc(50% - 0.5rem);
+    }
+
+    /* Sort button wraps to next line and takes full width */
+    .filters-always-visible .filter-group:nth-child(3) {
+        flex: 1 1 100%;
+        margin-top: 0.5rem;
+        min-width: 150px;
+    }
+}
+
+/* Ensure proper alignment when wrapped */
+@media (max-width: 600px) {
+    .filters-always-visible .filter-group:nth-child(3) {
+        margin-top: 0;
+    }
+}
+
+.filters-always-visible .filter-select {
+    display: block;
+    box-sizing: border-box;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    background: white;
+    padding: 0.5rem 2.25rem 0.6rem 0.75rem;
+    font-size: 0.9rem;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    background-repeat: no-repeat !important;
+    background-position: right 0.7rem center;
+    background-size: 1em;
+}
+
+.filters-always-visible .filter-button {
+    width: 100%;
+    height: 100%;
+    line-height: 1.4;
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    background: white;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.9rem;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Dark mode styling for filter elements */
+.dark .filters-always-visible .filter-select,
+.dark .filters-always-visible .filter-button {
+    background: #3a3a3a;
+    color: white;
+}
+
+/* Match dark control fill color for additional filters + search */
+.dark #assigneeButton,
+.dark #sortButton,
+.dark #searchInput {
+    background: #3a3a3a;
+    color: white;
+}
+
+.dark #repoFilter {
+    background-color: #3a3a3a;
+    color: white;
+    background-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23c9d1d9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6,9 12,15 18,9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat !important;
+    background-position: right 0.75rem center !important;
+    background-size: 1em !important;
+}
+
+/* Clean layout with proper flex containers */
+.filter-row-1 .view-controls,
+.filter-row-1 .filter-group,
+.filter-row-2 .filter-group,
+.filter-row-2 .toggle-filters-btn,
+.filter-row-2 .clear-filters-btn {
+    display: flex;
+    box-sizing: border-box;
+    align-items: center;
+}
+
+/* Compact filters for second row */
+.compact-filter {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Responsive icon/text switching */
+.toggle-filters-btn.narrow-container,
+.clear-filters-btn.narrow-container {
+    min-width: 38px;
+    justify-content: center;
+}
+
+/* Clear button icon visibility */
+.clear-filters-btn .clear-icon {
+    color: var(--text-primary);
+    font-size: 14px;
+}
+
+.clear-filters-btn.narrow-container .clear-icon {
+    color: var(--text-primary);
+    display: inline-block !important;
+}
+
+/* Simple responsive behavior for narrow screens */
+@media (max-width: 600px) {
+    .filters-always-visible {
+        gap: 3px;
+    }
+    
+    .filter-row-1,
+    .filter-row-2 {
+        gap: 3px;
+    }
+}
+
+/* Toggle filters button */
+.toggle-filters-btn {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    padding-left: 0.85rem;
+    padding-right: 0.85rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    background: white;
+    color: var(--dark-color);
+    font-size: 0.9rem;
+    cursor: pointer;
+    white-space: nowrap;
+    box-sizing: border-box;
+    transition: var(--transition);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#toggleFiltersBtn {
+    min-width: 93px;
+}
+#toggleFiltersBtn.narrow-container {
+    min-width: 38px;
+}
+
+.toggle-filters-btn:hover {
+    background: var(--hover-color);
+}
+
+/* Dark mode styling for toggle filters button */
+.dark .toggle-filters-btn {
+    background: #3a3a3a !important;
+    color: white !important;
+}
+
+.dark .toggle-filters-btn:hover {
+    background: #4a4a4a !important;
+}
+
+.toggle-filters-btn.active {
+    background: var(--light-color);
+    color: var(--dark-color);
+    border-color: var(--border-color);
+}
+
+/* Responsive toggle text - hide on narrow containers */
+@media (max-width: 600px) {
+    .toggle-text {
+        display: none;
+    }
+    
+    .toggle-filters-btn {
+        padding: 0.5rem;
+        padding-left: 0.65rem;
+        padding-right: 0.65rem;
+        min-width: 38px;
+        justify-content: center;
+    }
+    #toggleFiltersBtn {
+        min-width: 38px;
+    }
+}
+
+/* JavaScript-based narrow container class for more precise control */
+.toggle-filters-btn.narrow-container .toggle-text,
+.clear-filters-btn.narrow-container .clear-text {
+    display: none;
+}
+
+.toggle-filters-btn.narrow-container,
+.clear-filters-btn.narrow-container {
+    padding: 0.5rem;
+    min-width: 38px;
+    justify-content: center;
+}
+.toggle-filters-btn.narrow-container {
+    padding-left: 0.65rem;
+    padding-right: 0.65rem;
+}
+
+/* Clear filters button - compact style */
+.clear-filters-btn {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem !important;
+    background: white !important;
+    border: 1px solid var(--border-color) !important;
+    color: var(--dark-color) !important;
+    font-size: 0.9rem !important;
+    border-radius: var(--border-radius) !important;
+    white-space: nowrap;
+    box-sizing: border-box;
+    cursor: pointer;
+    transition: var(--transition) !important;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.clear-filters-btn:hover {
+    background: var(--hover-color) !important;
+}
+
+/* Dark mode styling for clear button */
+.dark .clear-filters-btn {
+    background: #3a3a3a !important;
+    border: 1px solid white !important;
+    color: white !important;
+}
+
+.dark .clear-filters-btn:hover {
+    background: #4a4a4a !important;
+}
+
+/* Remove padding when showing only icon */
+.clear-filters-btn.narrow-container {
+    padding: 0 !important;
+    min-width: 38px !important;
+    width: 38px !important;
+}
+
+.dark .filters-always-visible {
+    background: #262c36;
+}
+
+/* Collapsible filters section */
+.filters-section .filters-row {
+    margin-bottom: 1rem;
+}
+
+.filters-section .filters-row:last-child {
+    margin-bottom: 0;
+}
+
+.dark .filters-section {
+    background: #262c36;
+}
+
+/* Prevent excessive height on formatMe container */
+#formatMe {
+    min-height: auto !important;
+    height: auto !important;
+}
+
+/* Fullscreen widget styles */
+.widget-fullscreen {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    z-index: 9999 !important;
+    background: white !important;
+    overflow-y: auto !important;
+    padding: 1rem !important;
+    box-sizing: border-box !important;
+}
+
+.dark .widget-fullscreen {
+    background: var(--light-color) !important;
+}
+
+/* Hide other content when widget is fullscreen */
+body.widget-fullscreen-active {
+    overflow: hidden;
+}
+
+/* Minimize button in fullscreen mode */
+.minimize-btn {
+    position: absolute;
+    top: 1rem;
+    right: 1rem; /* Position to the right of search icon (search icon is at 3.5rem) */
+    background: none;
+    color: #555;
+    border: none;
+    padding: 0.5rem;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    z-index: 10000;
+    transition: var(--transition);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.minimize-btn:hover {
+    transform: scale(1.1);
+}
+
+/* Fullscreen toggle button in pagination */
+.fullscreen-btn:hover {
+    transform: scale(1.2);
+    transition: var(--transition);
+}
+
+.issues-list {
+    min-height: 400px;
+    container-type: inline-size;
+}
+
+/* Issue Items */
+.issue-item {
+    border-bottom: 1px solid var(--border-color);
+    padding: 1rem;
+    transition: var(--transition);
+    position: relative;
+    container-type: inline-size;
+}
+
+.issue-item:last-child {
+    border-bottom: none;
+}
+
+.issue-item:hover {
+    background: var(--light-color);
+}
+
+.dark .issue-item:hover {
+    background: #262c36;
+}
+
+.issue-header {
+    margin-bottom: 1rem;
+}
+
+.issue-title-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.issue-title {
+    flex: 1;
+    margin: 0;
+    font-size: 1.2rem;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.issue-title a {
+    color: var(--dark-color);
+    text-decoration: none;
+    transition: var(--transition);
+}
+
+.issue-title a:hover {
+    color: var(--primary-color);
+}
+
+.issue-number {
+    color: var(--text-muted);
+    font-weight: 600;
+    font-size: 1.25rem;
+    white-space: nowrap;
+}
+
+.dark .issue-number {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-muted);
+}
+
+.issue-open {
+    color: var(--success-color);
+    font-size: 1.2rem;
+    margin-top: 0.1rem;
+}
+
+.issue-closed {
+    color: var(--danger-color);
+    font-size: 1.2rem;
+    margin-top: 0.1rem;
+}
+
+.issue-meta {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    flex-wrap: wrap;
+}
+
+.issue-meta i {
+    min-width: 14px;
+    text-align: center;
+}
+
+.repo-name a {
+    color: var(--primary-color);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.repo-name a:hover {
+    text-decoration: underline;
+}
+
+.issue-description {
+    color: var(--dark-color);
+    line-height: 1.5;
+    margin-bottom: 1rem;
+    font-size: 0.95rem;
+}
+
+.issue-labels {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+}
+
+.issue-label {
+    padding: 0.25rem 0.5rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.issue-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 1rem;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.issue-author {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+.author-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+}
+
+.issue-assignees {
+    display: flex;
+    gap: 0.25rem;
+}
+
+.assignee-avatar {
+    width: 28px;
+    height: 23px;
+    border-radius: 50%;
+    border: 2px solid white;
+   
+}
+
+.assignee-avatar:first-child {
+    margin-left: 0;
+}
+
+.issue-actions {
+    display: flex;
+    gap: 0.5rem;
+    width: auto;
+    flex-shrink: 0;
+}
+
+.issue-actions .btn-outline {
+    background: white;
+    border-color: var(--primary-color);
+    border-radius: var(--border-radius);
+    padding: 0.4rem 0.75rem !important;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.dark .issue-actions .btn-outline {
+    background: var(--dark-color);
+    border: 1px solid var(--dark-color);
+}
+/* Wide view - show button text */
+@container (min-width: 769px) {
+    .card-view .issue-actions span {
+        display: inline !important;
+    }
+}
+
+/* Media query fallback for wide view */
+@media (min-width: 769px) {
+    .card-view .issue-actions span {
+        display: inline !important;
+    }
+}
+
+/* Repository Images */
+.repo-images {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    overflow: hidden;
+}
+
+.repo-image {
+    width: 60px;
+    height: 60px;
+    object-fit: cover;
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-color);
+}
+
+/* Pagination */
+.pagination-container {
+    padding: 1rem;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.pagination-info {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    order: 1;
+}
+
+.pagination-info .pagination-left {
+    flex: 1;
+    margin-right: 1rem;
+}
+
+.pagination-info .pagination-right {
+    flex-shrink: 0;
+    text-align: right;
+}
+
+/* Show header fullscreen icon in narrow containers */
+@container (max-width: 768px) {
+    
+    .pagination-info {
+        display: block;
+        position: relative;
+    }
+    
+    .pagination-info .pagination-left {
+        display: block;
+        margin-bottom: 0.5rem;
+        text-align: left;
+    }
+    
+    .pagination-info .pagination-right {
+        position: static;
+        display: block;
+        text-align: left;
+    }
+}
+.widget-fullscreen-active .header-fullscreen-btn {
+    display: none !important;
+}
+
+
+/* Media query fallback */
+@media (max-width: 480px) {
+    .header-fullscreen-btn {
+        display: none !important;
+    }
+    
+    /* Keep search button visible on mobile since it's essential for accessing filters */
+    .header-search-btn {
+        right: 1rem !important; /* Move to where fullscreen button was */
+        display: block !important;
+    }
+    
+    .pagination-info {
+        display: block;
+        position: relative;
+    }
+    
+    .pagination-info .pagination-left {
+        display: block;
+        margin-bottom: 0.5rem;
+        text-align: left;
+    }
+    
+    .pagination-info .pagination-right {
+        position: static;
+        display: block;
+        text-align: left;
+    }
+}
+
+.pagination-controls {
+    display: flex;
+    gap: 0.25rem;
+    align-self: center;
+    order: 2;
+}
+
+.pagination-btn {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border-color);
+    background: white;
+    cursor: pointer;
+    border-radius: var(--border-radius);
+    transition: var(--transition);
+    font-size: 0.9rem;
+}
+
+.dark .pagination-btn {
+    background: #2a2a2a;
+    border-color: #444;
+    color: #fff;
+}
+
+.dark .pagination-btn:hover:not(.disabled):not(.active) {
+    background: #363636;
+    border-color: #4a90e2;
+}
+
+.dark .pagination-btn.active {
+    background: #137AD1;
+    border-color: #137AD1;
+    color: #fff;
+}
+
+.pagination-btn:hover:not(.disabled):not(.active) {
+    background: var(--light-color);
+    border-color: var(--primary-color);
+}
+
+.pagination-btn.active {
+    background: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
+.pagination-btn.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* No Issues State */
+.no-issues {
+    text-align: center;
+    padding: 4rem 2rem;
+    color: var(--text-muted);
+}
+
+.no-issues i {
+    font-size: 4rem;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+.no-issues h3 {
+    margin: 0 0 1rem 0;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+/* Error Message */
+.error-message {
+    background: white;
+    border: 1px solid var(--danger-color);
+    border-radius: var(--border-radius);
+    padding: 2rem;
+    text-align: center;
+    margin: 2rem 0;
+    box-shadow: var(--box-shadow);
+}
+
+.dark .error-message {
+    background: var(--light-color);
+}
+
+.error-icon {
+    color: var(--danger-color);
+    font-size: 3rem;
+    margin-bottom: 1rem;
+}
+
+.error-content h3 {
+    color: var(--danger-color);
+    margin: 0 0 1rem 0;
+}
+
+.error-content p {
+    color: var(--text-muted);
+    margin: 0 0 2rem 0;
+    line-height: 1.5;
+}
+
+/* Modal */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--bg-overlay);
+    display: none;
+    justify-content: center;
+    align-items: flex-start;
+    z-index: 9999;
+    padding: 2rem;
+    backdrop-filter: blur(4px);
+    overflow-y: auto;
+}
+
+.modal-content {
+    background: white;
+    border-radius: var(--border-radius);
+    box-shadow: var(--box-shadow);
+    width: 100%;
+    max-width: 900px;
+    max-height: 90vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    margin-top: 2rem;
+}
+
+.dark .modal-content {
+    background: var(--light-color);
+}
+
+.modal-header {
+    padding: 1rem;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-header h2 {
+    margin: 0;
+    font-weight: 600;
+    color: var(--dark-color);
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 1rem;
+    cursor: pointer;
+    color: var(--text-muted);
+    padding: 0.5rem;
+    border-radius: var(--border-radius);
+    transition: var(--transition);
+}
+
+.modal-close:hover {
+    background: var(--light-color);
+    color: var(--dark-color);
+}
+
+.modal-body {
+    flex: 1;
+    padding: 1rem;
+    overflow-y: auto;
+}
+
+/* Issue Detail Modal Content */
+.issue-header-detail {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.issue-meta-detail {
+    flex: 1;
+}
+
+.repo-info {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+.repo-info i {
+    margin-right: 0.5rem;
+}
+
+.repo-info a {
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+.issue-dates {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+.issue-section {
+    margin-bottom: 2rem;
+}
+
+.issue-section h4 {
+    margin: 0 0 1rem 0;
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: var(--dark-color);
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.5rem;
+}
+
+.issue-labels-detail {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.assignees-detail {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.assignee-detail {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    background: var(--light-color);
+    border-radius: var(--border-radius);
+}
+
+.comments-section {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.comment-item {
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    margin-bottom: 1rem;
+    overflow: hidden;
+}
+
+.comment-header {
+    background: var(--light-color);
+    padding: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.comment-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+}
+
+.comment-date {
+    margin-left: auto;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.comment-body {
+    padding: 1rem;
+    line-height: 1.5;
+}
+
+.issue-actions-detail {
+    display: flex;
+    gap: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+}
+
+/* Summary View */
+.issues-list.summary-view .issue-item {
+    padding: 1rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.issues-list.summary-view .issue-item:last-child {
+    border-bottom: none;
+}
+
+.issues-list.summary-view .issue-title {
+    font-size: 1.1rem;
+    margin-bottom: 0.1rem; /* Reduced space between title and text */
+    margin-top: 0;
+}
+
+.issues-list.summary-view .issue-description {
+    font-size: 0.9rem;
+    line-height: 1.4;
+    margin-bottom: 0.5rem;
+    color: var(--text-muted);
+}
+
+.issues-list.summary-view .issue-meta,
+.issues-list.summary-view .issue-body-preview {
+    display: none;
+}
+
+/* Repo name and issue number line */
+.issue-repo-line {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.25rem;
+}
+
+.repo-issue-link {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.repo-issue-link:hover {
+    color: var(--accent-blue);
+    text-decoration: underline;
+}
+
+/* Summary view specific styling */
+.issues-list.summary-view .short-title {
+    cursor: pointer;
+    transition: color 0.2s ease;
+    margin-bottom: 0.1rem;
+}
+
+.issues-list.summary-view .short-title:hover {
+    color: var(--accent-blue);
+}
+
+/* Full details styling when expanded */
+.issue-full-details {
+    margin-top: 0.75rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border-color);
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-5px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.dark .issue-full-details {
+    border-top-color: #30363d;
+}
+
+.issue-description-full {
+    font-size: 0.9rem;
+    line-height: 1.4;
+}
+
+/* Short description styling */
+.short-description {
+    font-size: 0.9rem;
+    line-height: 1.4;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+    margin-top: 0.1rem; /* Reduced space between title and text */
+}
+
+/* More/Less link styling */
+.more-link,
+.less-link {
+    color: var(--primary-color);
+    text-decoration: none;
+    font-weight: 500;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: var(--transition);
+    margin-left: 0.25rem;
+}
+
+.more-link:hover,
+.less-link:hover {
+    text-decoration: underline;
+    color: #0256cc;
+}
+
+.dark .more-link,
+.dark .less-link {
+    color: var(--primary-color);
+}
+
+.dark .more-link:hover,
+.dark .less-link:hover {
+    color: #58a6ff;
+}
+
+/* Inline details container */
+.issue-detail-inline {
+    padding: 0.75rem 0;
+}
+
+/* Inline metadata */
+.issue-meta-inline {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.issue-meta-inline i {
+    min-width: 14px;
+    text-align: center;
+}
+
+.dark .issue-meta-inline {
+    border-bottom-color: #30363d;
+}
+
+/* Inline sections */
+.issue-section-inline {
+    margin-bottom: 1.25rem;
+}
+
+.issue-section-inline h5.section-title {
+    margin: 0 0 0.75rem 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--dark-color);
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.dark .issue-section-inline h5.section-title {
+    border-bottom-color: #30363d;
+}
+
+/* Comments section inline */
+.comments-section-inline {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.comments-section-inline .comment-item {
+    margin-bottom: 0.75rem;
+    font-size: 0.85rem;
+}
+
+.comments-section-inline .comment-header {
+    padding: 0.5rem;
+    font-size: 0.85rem;
+}
+
+.comments-section-inline .comment-body {
+    padding: 0.75rem;
+    font-size: 0.9rem;
+}
+
+/* Action buttons inline */
+.issue-actions-inline {
+    display: flex;
+    gap: 0.75rem;
+    padding: 0.75rem 0;
+    border-top: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 0.75rem;
+}
+.issue-actions-inline .btn,
+.issue-actions-inline > div {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    padding: 0.45rem 0.9rem !important;
+}
+.issue-actions-inline .btn i,
+.issue-actions-inline > div i {
+    margin-right: 0;
+}
+
+.dark .issue-actions-inline {
+    border-top-color: #30363d;
+    border-bottom-color: #30363d;
+}
+
+/* Collapse link container */
+.collapse-link-container {
+    text-align: center;
+    padding-top: 0.5rem;
+}
+
+.collapse-link-container .less-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.9rem;
+}
+
+.issues-list.list-view .issue-body-preview {
+    display: none;
+}
+
+
+/* Card View - Force 2 columns always */
+.issues-list.card-view {  
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important; /* avoids right overlap */
+  gap: 0.75rem !important;
+  padding: 0.75rem !important;
+  box-sizing: border-box;
+}
+
+/* Override any existing card item styles */
+.card-view .issue-item {
+    /* Height follows content (was forced square, which left wide two-column cards much taller than needed) */
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important; /* left-aligned, top-down (was centered) */
+    justify-content: flex-start !important;
+    text-align: left !important;
+    padding: 1rem !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: var(--border-radius) !important;
+    box-shadow: var(--box-shadow) !important;
+}
+
+/* Force hide everything except title and actions */
+.card-view .issue-meta,
+.card-view .issue-body,
+.card-view .issue-footer,
+.card-view .issue-author,
+.card-view .issue-assignees,
+.card-view .issue-repo-name,
+.card-view .issue-body-preview,
+.card-view .issue-description,
+.card-view .short-description,
+.card-view .issue-full-details {
+    display: none !important;
+}
+
+/* Hide the issue header parts except title */
+.card-view .issue-header .issue-repo-line {
+    display: none !important;
+}
+
+/* Show 3-dot menu in card view and position at top right */
+.card-view .issue-header .issue-actions-menu {
+    position: absolute !important;
+    top: 0.5rem !important;
+    right: 0.5rem !important;
+    margin-left: 0 !important;
+    display: inline-block !important;
+}
+
+/* Increase z-index for dropdown in card view to ensure it appears above other cards */
+.card-view .issue-actions-menu .issue-menu-dropdown {
+    z-index: 1001 !important;
+}
+
+/* Only show the title in card view */
+.card-view .issue-header {
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: flex-start !important;
+}
+
+.card-view .issue-title {
+    font-size: 0.85rem !important;
+    line-height: 1.2 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: -webkit-box !important;
+    -webkit-line-clamp: 4 !important;
+    -webkit-box-orient: vertical !important;
+    overflow: hidden !important;
+    word-wrap: break-word !important;
+    width: 100% !important;
+}
+
+.card-view .issue-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(27, 31, 35, 0.15);
+}
+
+/* Disable card hover transform when dropdown menu is open to prevent flickering */
+.card-view .issue-item:has(.issue-menu-dropdown.show):hover {
+    transform: none;
+}
+
+/* Show and style detail button in card view */
+.card-view .issue-actions {
+    display: flex !important;
+    justify-content: flex-start;
+    margin-top: 0.75rem;
+}
+
+/* Hide narrow-specific content in wider card view */
+.card-view .issue-repo-name,
+.card-view .issue-body-preview {
+    display: none;
+}
+
+/* Wide card view - show all details like list view */
+.issues-list.card-view .issue-item {
+    padding: 1rem;
+}
+
+.issues-list.card-view .issue-meta,
+.issues-list.card-view .issue-body,
+.issues-list.card-view .issue-footer {
+    display: block !important;
+}
+
+.issues-list.card-view .issue-repo-name,
+.issues-list.card-view .issue-body-preview {
+    display: none !important;
+}
+
+
+
+/* Notifications */
+.notification {
+    position: fixed;
+    top: 2rem;
+    right: 2rem;
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 1rem;
+    box-shadow: var(--box-shadow);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    z-index: 10000;
+    transform: translateX(400px);
+    transition: transform 0.3s ease;
+    max-width: 350px;
+}
+
+/* Inline notifications (inside issues container) */
+.inline-notification {
+    background: rgba(248, 249, 250, 0.8);
+    border: 1px solid rgba(225, 228, 232, 0.3);
+    border-radius: var(--border-radius);
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    transition: var(--transition);
+    min-height: auto;
+    line-height: 1.2;
+}
+
+.inline-notification i {
+    opacity: 0.7;
+    font-size: 0.75rem;
+    flex-shrink: 0;
+    min-width: 12px;
+    height: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.inline-notification .inline-spinner {
+    animation: spin 1s linear infinite;
+    opacity: 0.8;
+}
+
+.dark .inline-notification {
+    background: rgba(33, 38, 45, 0.6);
+    border-color: rgba(48, 54, 61, 0.3);
+    color: var(--text-muted);
+}
+
+.inline-notification.success {
+    background: rgba(212, 237, 218, 0.5);
+    border-color: rgba(40, 167, 69, 0.2);
+    color: #155724;
+}
+
+.inline-notification.info {
+    background: rgba(209, 236, 241, 0.5);
+    border-color: rgba(23, 162, 184, 0.2);
+    color: #0c5460;
+}
+
+.inline-notification.error {
+    background: rgba(248, 215, 218, 0.5);
+    border-color: rgba(220, 53, 69, 0.2);
+    color: #721c24;
+}
+
+.dark .inline-notification.success {
+    background: rgba(40, 167, 69, 0.1);
+    color: #75b894;
+}
+
+.dark .inline-notification.info {
+    background: rgba(23, 162, 184, 0.1);
+    color: #7bc9d9;
+}
+
+.dark .inline-notification.error {
+    background: rgba(220, 53, 69, 0.1);
+    color: #f1aeb5;
+}
+
+.notification.show {
+    transform: translateX(0);
+}
+
+.notification.success {
+    border-color: var(--success-color);
+    background: #d4edda;
+    color: #155724;
+}
+
+.notification.info {
+    border-color: var(--info-color);
+    background: #d1ecf1;
+    color: #0c5460;
+}
+
+.notification.error {
+    border-color: var(--danger-color);
+    background: #f8d7da;
+    color: #721c24;
+}
+
+/* Responsive Design for narrow containers */
+@container (max-width: 500px) {
+    .issue-footer {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.75rem;
+    }
+    
+    .issue-actions {
+        order: 3;
+        align-self: flex-start;
+        margin-top: 0;
+    }
+    
+    .issue-assignees {
+        order: 2;
+        align-self: flex-start;
+    }
+    
+    .issue-author {
+        order: 1;
+    }
+}
+
+/* Fallback for browsers that don't support @container queries */
+@media (max-width: 500px) {
+    .issue-footer {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.75rem;
+    }
+    
+    .issue-actions {
+        align-self: flex-start;
+        width: auto;
+        margin-top: 0;
+    }
+    
+    .issue-assignees {
+        align-self: flex-start;
+    }
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .issues-header {
+        padding: 1rem;
+    }
+    
+    .issues-header h1 {
+        font-size: 2rem;
+    }
+    
+    .filters-row {
+        /* flex-direction: column; */
+        align-items: stretch;
+        gap: 0.5rem;
+    }
+    
+    .filter-group {
+        width: 100%;
+    }
+    
+    .filter-select,
+    .filter-button {
+        width: 100%;
+        min-width: auto;
+    }
+    
+    .search-group {
+        flex-direction: row;
+        gap: 0.5rem;
+        align-items: center;
+    }
+    
+    .view-controls {
+        justify-content: center;
+    }
+    
+    .stats-section {
+        flex-direction: column;
+    }
+    
+    .stat-card {
+        min-width: auto;
+    }
+    
+    .issue-footer {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+    }
+    
+    .issue-actions {
+        flex-wrap: wrap;
+    }
+    
+    
+    .modal-overlay {
+        padding: 1rem;
+    }
+    
+    .modal-content {
+        margin-top: 1rem;
+    }
+    
+    .modal-header {
+        padding: 1rem;
+    }
+    
+    .modal-body {
+        padding: 1rem;
+    }
+    
+    .pagination-container {
+        flex-direction: column;
+        text-align: center;
+    }
+    
+    .assignees-detail {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .issue-actions-detail {
+        flex-direction: column;
+    }
+    
+    .notification {
+        right: 1rem;
+        top: 1rem;
+        max-width: calc(100vw - 2rem);
+    }
+}
+
+@media (max-width: 480px) {
+    .auth-input {
+        flex-direction: column;
+    }
+    
+    .auth-help span {
+        display: block;
+        margin-bottom: 0.5rem;
+    }
+    
+    .instructions-content ol {
+        padding-left: 1rem;
+    }
+    
+    .issue-meta {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    
+    .issue-title {
+        font-size: 1.1rem;
+    }
+    
+    .pagination-controls {
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+}
+
+/* Print Styles */
+@media print {
+    .auth-section,
+    .filters-section,
+    .view-controls,
+    .pagination-container,
+    .issue-actions,
+    .modal-overlay {
+        display: none !important;
+    }
+    
+    .issues-header {
+        background: none !important;
+        color: black !important;
+        border: 1px solid #ccc;
+    }
+    
+    .issue-item {
+        break-inside: avoid;
+        page-break-inside: avoid;
+    }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+    :root {
+        --border-color: #000;
+        --text-muted: #333;
+    }
+    
+    .filter-button {
+        border-width: 2px;
+    }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+/* Show the modal when JS adds the .show class */
+.modal-overlay.show {
+  display: flex;
+}
+
+/* 3-wide when fullscreen */
+.widget-fullscreen-active .issues-list.card-view {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+}
+/* When the containing div is >= 800px, show the short description */
+@container (min-width: 800px) {
+  .card-view .short-description { 
+    display: block !important; 
+  }
+  /* Let cards be natural height when showing text */
+  .card-view .issue-item { 
+    aspect-ratio: auto !important;
+    align-items: flex-start !important;
+    text-align: left !important;
+  }
+}
+
+/* Optional: allow earlier (>=500px) if you want it to show sooner */
+@container (min-width: 500px) and (max-width: 799px) {
+  .card-view .short-description { 
+    display: block !important; 
+  }
+}
+.search-stats {
+  margin-top: 0.25rem;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+/* Row view (rowView option) — each issue is a 2-line row (repo #number, title) that expands
+   on click to show its details; each comment is a 2-line row (author/date, text) likewise. */
+/* Compact rows rarely fill the 400px .issues-list minimum, which left a blank band below them */
+.issues-list.row-view {
+    min-height: 0;
+}
+
+.issues-list.row-view .issue-item {
+    padding: 0.6rem 0.75rem;
+}
+
+.issues-list.row-view .issue-header {
+    cursor: pointer;
+}
+
+.issues-list.row-view .issue-repo-line {
+    margin-bottom: 0.1rem;
+}
+
+.issues-list.row-view .issue-item:not(.expanded) .short-title {
+    font-size: 0.95rem;
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.issues-list.row-view .issue-item:not(.expanded) .issue-full-details {
+    display: none !important;
+}
+
+.issues-list.row-view .comment-item {
+    cursor: pointer;
+    margin-bottom: 0.5rem;
+}
+
+.issues-list.row-view .comment-header {
+    padding: 0.35rem 0.5rem;
+}
+
+.issues-list.row-view .comment-item:not(.expanded) .comment-header {
+    border-bottom: none;
+}
+
+.issues-list.row-view .comment-item:not(.expanded) .comment-body {
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    max-height: 1.5em;
+    padding: 0 0.5rem 0.35rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+}
+
+.issues-list.row-view .comment-item:not(.expanded) .comment-body * {
+    margin: 0;
+    padding: 0;
+    font-size: inherit;
+}
+
+.issues-list.row-view .comment-item:not(.expanded) .comment-body img,
+.issues-list.row-view .comment-item:not(.expanded) .comment-body pre {
+    display: none;
+}
+
+/* "Comments (n)" subtitle toggles its comments (toggleCommentsSection in issues.js) */
+.comments-toggle {
+    cursor: pointer;
+    user-select: none;
+}
+.comments-toggle:hover {
+    color: var(--accent-blue);
+}
+.comments-toggle-section:not(.comments-open) .comments-section-inline,
+.comments-toggle-section:not(.comments-open) .comments-section {
+    display: none;
+}
