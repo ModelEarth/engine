@@ -50,6 +50,7 @@ class GitHubIssuesManager {
         this.githubToken = localStorage.getItem('github_token') || '';
         this.baseURL = 'https://api.github.com';
         this.owner = config.githubOwner;
+        this.defaultOwner = config.githubOwner; // ModelEarth unless set; the signed-in account's repos replace it
         this.detectCurrentFolder = config.detectCurrentFolder;
         this.multiRepoRoots = config.multiRepoRoots;
         this.showProject = config.showProject;
@@ -150,27 +151,28 @@ class GitHubIssuesManager {
         return pathParts.length > 0 ? pathParts[0] : '';
     }
 
-    getHubPath() {
-        // Determine the correct path to hub/repos.csv based on the script's location
-        const scripts = document.getElementsByTagName('script');
-        for (let script of scripts) {
-            if (script.src && script.src.includes('/engine/js/projects.js')) {
-                const srcAttribute = script.getAttribute('src');
-                // If script src starts with ../js/ (from hub directory)
-                if (srcAttribute && srcAttribute.startsWith('../js/')) {
-                    return 'repos.csv';
-                }
-                // If script src is js/projects.js (from engine directory)
-                else if (srcAttribute && srcAttribute === 'js/projects.js') {
-                    return 'hub/repos.csv';
-                }
-                break;
-            }
-        }
+    // hub/repos.csv is off for now (see loadRepositoriesFromCSV).
+    // getHubPath() {
+    //     // Determine the correct path to hub/repos.csv based on the script's location
+    //     const scripts = document.getElementsByTagName('script');
+    //     for (let script of scripts) {
+    //         if (script.src && script.src.includes('/engine/js/projects.js')) {
+    //             const srcAttribute = script.getAttribute('src');
+    //             // If script src starts with ../js/ (from hub directory)
+    //             if (srcAttribute && srcAttribute.startsWith('../js/')) {
+    //                 return 'repos.csv';
+    //             }
+    //             // If script src is js/projects.js (from engine directory)
+    //             else if (srcAttribute && srcAttribute === 'js/projects.js') {
+    //                 return 'hub/repos.csv';
+    //             }
+    //             break;
+    //         }
+    //     }
 
-        // Fallback: climb out of js folder and into hub folder
-        return '../hub/repos.csv';
-    }
+    //     // Fallback: climb out of js folder and into hub folder
+    //     return '../hub/repos.csv';
+    // }
 
     determineDefaultRepo() {
         if (!this.detectCurrentFolder) {
@@ -662,6 +664,9 @@ class GitHubIssuesManager {
         // Auto-detect owner from current URL or default to ModelEarth
         this.detectOwner();
 
+        // Signed in as another GitHub account: use its repositories
+        await this.resolveOwnerFromToken();
+
         // Load rate limit info from cache
         this.loadRateLimitFromCache();
 
@@ -826,6 +831,68 @@ class GitHubIssuesManager {
         // Could Add more detection logic here
     }
 
+    // Signed in (GitHub token) as an account other than ModelEarth: list that account's repositories
+    // instead of ModelEarth's. The token's login is saved with the token's last characters, so it's
+    // looked up once per token.
+    async resolveOwnerFromToken() {
+        let owner = this.defaultOwner;
+        if (this.githubToken) {
+            const tokenEnd = this.githubToken.slice(-8);
+            let login = null;
+            try {
+                const saved = JSON.parse(localStorage.getItem('github_token_login') || 'null');
+                if (saved && saved.tokenEnd === tokenEnd) login = saved.login;
+            } catch (error) {
+            }
+            if (!login) {
+                try {
+                    const user = await this.apiRequest('/user');
+                    login = user && user.login;
+                    if (login) localStorage.setItem('github_token_login', JSON.stringify({ tokenEnd, login }));
+                } catch (error) {
+                    console.warn('Could not look up the GitHub token account:', error.message);
+                }
+            }
+            if (login && login.toLowerCase() !== 'modelearth') owner = login;
+        }
+        this.useOwner(owner);
+    }
+
+    // Sets whose repositories are listed. The repo and issue caches aren't keyed by owner,
+    // so they're cleared when the owner changes.
+    useOwner(owner) {
+        this.owner = owner;
+        const lastOwner = localStorage.getItem('github_issues_owner') || this.defaultOwner;
+        if (lastOwner.toLowerCase() !== owner.toLowerCase()) {
+            ['github_issues_base_cache', 'github_issues_filtered_cache', 'github_all_repos', 'github_all_repos_time',
+                'github_repo_count', 'github_repo_count_time'].forEach(key => localStorage.removeItem(key));
+            Object.keys(localStorage)
+                .filter(key => key.startsWith('github_repos_') || key.startsWith('repo_issue_counts'))
+                .forEach(key => localStorage.removeItem(key));
+            this.clearRepositoryCache();
+            this.loadedAllRepositories = false;
+        }
+        localStorage.setItem('github_issues_owner', owner);
+    }
+
+    // True when listing the signed-in account's repositories rather than ModelEarth's
+    isOwnAccount() {
+        return (this.owner || '').toLowerCase() !== (this.defaultOwner || '').toLowerCase();
+    }
+
+    // GitHub API repos (from loadRepositoriesFromGitHub) in the form this.repositories uses
+    toRepositoryList(apiRepos) {
+        return apiRepos.map(apiRepo => ({
+            name: apiRepo.repo_name,
+            displayName: apiRepo.display_name,
+            description: apiRepo.description,
+            defaultBranch: apiRepo.default_branch,
+            openIssueCount: apiRepo.open_issues_count,
+            totalIssueCount: null,
+            repository_url: apiRepo.html_url || `https://github.com/${this.owner}/${apiRepo.repo_name}`
+        }));
+    }
+
     async loadRepositoriesWithIssues() {
 
         // Start with projects repo as default and highest priority
@@ -877,53 +944,23 @@ class GitHubIssuesManager {
     }
 
     async loadRepositoriesFromCSV() {
-        try {
-            const response = await fetch(this.getHubPath());
-            if (!response.ok) {
-                throw new Error(`CSV fetch failed: ${response.status}`);
-            }
-            const csvText = await response.text();
-            const parsed = this.parseCSV(csvText);
-            return parsed;
-        } catch (error) {
-            console.error('Error loading repositories from CSV:', error);
-            // Fallback to hardcoded list (updated with additional repositories)
+        // hub/repos.csv is off for now, so this built-in list is always used. To read the CSV again,
+        // uncomment this, the closing brace after the list, and getHubPath() above.
+        // try {
+        //     const response = await fetch(this.getHubPath());
+        //     if (!response.ok) {
+        //         throw new Error(`CSV fetch failed: ${response.status}`);
+        //     }
+        //     const csvText = await response.text();
+        //     const parsed = this.parseCSV(csvText);
+        //     return parsed;
+        // } catch (error) {
+        //     console.error('Error loading repositories from CSV:', error);
+            // Only the projects repo (ModelEarth/projects); the widget lists its issues.
             return [
-                { repo_name: 'modelearth', display_name: 'ModelEarth', description: 'Main ModelEarth repository', default_branch: 'master' },
-                { repo_name: 'localsite', display_name: 'LocalSite', description: 'Core CSS/JS utilities', default_branch: 'main' },
-                { repo_name: 'realitystream', display_name: 'RealityStream', description: 'ML Models and Visualization', default_branch: 'main' },
-                { repo_name: 'feed', display_name: 'Feed', description: 'FeedPlayer video/gallery', default_branch: 'main' },
-                { repo_name: 'swiper', display_name: 'Swiper', description: 'UI swiper components', default_branch: 'main' },
-                { repo_name: 'comparison', display_name: 'Comparison', description: 'Trade Flow tools', default_branch: 'main' },
-                { repo_name: 'codechat', display_name: 'CodeChat', description: 'Code chat interface', default_branch: 'main' },
-                { repo_name: 'home', display_name: 'Home', description: 'Home page content', default_branch: 'main' },
-                { repo_name: 'cloud', display_name: 'Cloud', description: 'Cloud platform tools', default_branch: 'main' },
                 { repo_name: 'projects', display_name: 'Projects', description: 'Project showcases', default_branch: 'main' },
-                { repo_name: 'team', display_name: 'Team', description: 'Rust REST API for Azure', default_branch: 'main' },
-                { repo_name: 'products', display_name: 'Products', description: 'Products frontend and python', default_branch: 'main' },
-                { repo_name: 'products-data', display_name: 'Products Data', description: 'Products data output', default_branch: 'main' },
-                { repo_name: 'profile', display_name: 'Profile', description: 'Profile frontend analysis', default_branch: 'main' },
-                { repo_name: 'exiobase', display_name: 'Exiobase', description: 'Trade flow output to .csv and SQL', default_branch: 'main' },
-                { repo_name: 'io', display_name: 'IO', description: 'Input-output analysis', default_branch: 'main' },
-                { repo_name: 'useeio.js', display_name: 'USEEIO.JS', description: 'JavaScript footprint tools', default_branch: 'dev' },
-                { repo_name: 'useeio-widgets', display_name: 'USEEIO Widgets', description: 'USEEIO React widgets', default_branch: 'master' },
-                { repo_name: 'useeio-widgets-without-react', display_name: 'USEEIO Widgets Without React', description: 'USEEIO widgets without React', default_branch: 'master' },
-                { repo_name: 'useeiopy', display_name: 'USEEIO Python', description: 'Python USEEIO library', default_branch: 'master' },
-                { repo_name: 'useeio_api', display_name: 'USEEIO API', description: 'USEEIO REST API', default_branch: 'master' },
-                { repo_name: 'useeio', display_name: 'USEEIO Core', description: 'Core USEEIO model', default_branch: 'master' },
-                { repo_name: 'useeior', display_name: 'USEEIO R', description: 'R package for USEEIO', default_branch: 'master' },
-                { repo_name: 'useeio-state', display_name: 'USEEIO State', description: 'State-level USEEIO data', default_branch: 'main' },
-                { repo_name: 'useeio-json', display_name: 'USEEIO JSON', description: 'USEEIO JSON data', default_branch: 'main' },
-                { repo_name: 'mario', display_name: 'Mario', description: 'Multi-regional input-output', default_branch: 'main' },
-                { repo_name: 'webroot', display_name: 'Webroot', description: 'PartnerTools webroot', default_branch: 'main' },
-                { repo_name: 'data-pipeline', display_name: 'Data Pipeline', description: 'Python data processing pipeline', default_branch: 'main' },
-                { repo_name: 'community-data', display_name: 'Community data', description: 'Community-level data outputs', default_branch: 'master' },
-                { repo_name: 'community-timelines', display_name: 'Community Timeline', description: 'Timeline data for communities', default_branch: 'main' },
-                { repo_name: 'community-zipcodes', display_name: 'Community Zipcodes', description: 'ZIP code level community data', default_branch: 'main' },
-                { repo_name: 'community-forecasting', display_name: 'Community Forecasting', description: 'Forecasting frontend', default_branch: 'main' },
-                { repo_name: 'dataflow', display_name: 'Data flow', description: 'Data flow NextJS UX', default_branch: 'main' },
             ];
-        }
+        // }
     }
 
     async detectEntityType() {
@@ -969,6 +1006,44 @@ class GitHubIssuesManager {
             console.warn(`Error detecting entity type for ${this.owner}:`, error);
             return 'user'; // Default fallback
         }
+    }
+
+    // The owner's most recently updated repositories that have issues turned on, newest first.
+    // Cached for an hour per owner.
+    async loadRecentRepositoriesFromGitHub(limit = 5) {
+        const cacheKey = `github_recent_repos_${this.owner.toLowerCase()}`;
+        const cacheTimeKey = `${cacheKey}_time`;
+        const cachedData = localStorage.getItem(cacheKey);
+        const cacheTime = localStorage.getItem(cacheTimeKey);
+        if (cachedData && cacheTime && Date.now() - parseInt(cacheTime) < 60 * 60 * 1000) {
+            return JSON.parse(cachedData).slice(0, limit);
+        }
+
+        if (!this.githubToken) {
+            return null;
+        }
+
+        // One page sorted by last update, with room to skip archived repos and repos without issues
+        const entityType = await this.detectEntityType();
+        const endpoint = entityType === 'org'
+            ? `/orgs/${this.owner}/repos`
+            : `/users/${this.owner}/repos`;
+        const pageRepos = await this.apiRequest(`${endpoint}?per_page=30&type=all&sort=updated&direction=desc`);
+        const repos = pageRepos
+            .filter(repo => repo.has_issues && !repo.archived)
+            .slice(0, limit)
+            .map(repo => ({
+                repo_name: repo.name,
+                display_name: repo.name,
+                description: repo.description || '',
+                default_branch: repo.default_branch || 'main',
+                open_issues_count: repo.open_issues_count,
+                html_url: repo.html_url
+            }));
+
+        localStorage.setItem(cacheKey, JSON.stringify(repos));
+        localStorage.setItem(cacheTimeKey, Date.now().toString());
+        return repos;
     }
 
     async loadRepositoriesFromGitHub(specificRepos = null) {
@@ -1068,15 +1143,7 @@ class GitHubIssuesManager {
             const allRepos = await this.loadRepositoriesFromGitHub(null); // null = load all
 
             if (allRepos && allRepos.length > 0) {
-                this.repositories = allRepos.map(apiRepo => ({
-                    name: apiRepo.repo_name,
-                    displayName: apiRepo.display_name,
-                    description: apiRepo.description,
-                    defaultBranch: apiRepo.default_branch,
-                    openIssueCount: apiRepo.open_issues_count,
-                    totalIssueCount: null,
-                    repository_url: apiRepo.html_url || `https://github.com/${this.owner}/${apiRepo.repo_name}`
-                }));
+                this.repositories = this.toRepositoryList(allRepos);
 
                 this.loadedAllRepositories = true;
 
@@ -2123,8 +2190,16 @@ class GitHubIssuesManager {
 
             this.showNotification('Token saved successfully', 'success');
 
-            // Check if issues previously failed due to rate limiting and refresh them
-            await this.refreshIssuesAfterTokenSave();
+            // Signed in as another account (or back to ModelEarth): switch to its repositories
+            const previousOwner = this.owner;
+            await this.resolveOwnerFromToken();
+
+            if (this.owner !== previousOwner && this.initialized) {
+                await this.loadData(true);
+            } else {
+                // Check if issues previously failed due to rate limiting and refresh them
+                await this.refreshIssuesAfterTokenSave();
+            }
 
             // Reload repositories with new token to populate all available repos
             try {
@@ -2200,6 +2275,14 @@ class GitHubIssuesManager {
             localStorage.removeItem('github_issues_base_cache');
             localStorage.removeItem('github_issues_filtered_cache');
             this.clearRepositoryCache();
+
+            // Without a token, list ModelEarth's repositories again
+            const previousOwner = this.owner;
+            this.useOwner(this.defaultOwner);
+            if (this.owner !== previousOwner && this.initialized) {
+                this.loadData(true);
+            }
+
             this.updateTokenUI();
             this.updateTokenSectionUI();
             this.showNotification('GitHub token cleared successfully', 'info');
@@ -2294,7 +2377,23 @@ class GitHubIssuesManager {
     async loadRepositoriesFromCSVToUI() {
         // Try to load repositories from GitHub API first if we have a token
         let allRepos = null;
-        if (this.githubToken) {
+        if (this.githubToken && this.isOwnAccount()) {
+            // Signed in as another account: list its 5 most recently updated repositories, not
+            // ModelEarth's projects. "Load All Repos" in the repo menu lists the rest.
+            const ownRepos = await this.loadRecentRepositoriesFromGitHub(5);
+            this.repositories = ownRepos && ownRepos.length > 0 ? this.toRepositoryList(ownRepos) : [];
+            this.loadedAllRepositories = false;
+            if (this.repositories.length > 0 && !this.repositories.find(r => r.name === this.filters.repo)) {
+                this.filters.repo = this.repositories[0].name;
+            }
+            try {
+                this.totalRepositoryCount = await this.getRepositoryCount();
+            } catch (error) {
+                console.warn('Could not get total repository count:', error);
+            }
+            await this.loadRepositoryIssueCountsForDisplayed();
+            return;
+        } else if (this.githubToken) {
             // Load only ModelEarth repositories that have at least one issue
             allRepos = await this.loadRepositoriesWithIssues();
             this.loadedAllRepositories = false;
