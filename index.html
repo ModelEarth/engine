@@ -431,6 +431,11 @@ tbody tr td:nth-child(2) {
 </head>
 
 <body>
+<!-- #fullscreen (localsite/css/base.css): the window's height below the header. localsite's showGlobalMap()
+     puts the Earth map (#mainEarthDisplay) in it, with this play/pause button at its lower right. -->
+<div id="fullscreen" style="position:relative">
+<div id="earthPlayPauseButton" class="earthPlay playPauseButton" role="button" tabindex="0" title="Next photo" aria-label="Next photo"><i class="material-icons play-pause-icon" aria-hidden="true">play_arrow</i></div>
+</div>
 
 <div style="clear:both; min-height:250px; display:none" class="displayOnload">
 
