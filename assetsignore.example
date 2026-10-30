@@ -1,0 +1,11 @@
+# Copy to `.assetsignore` at the ROOT of your webroot (the wrangler "assets.directory").
+# Wrangler will then never upload these as public static files.
+.env
+.env.*
+**/.env
+**/.env.*
+.dev.vars
+**/.dev.vars
+**/node_modules
+**/.git
+engine/server

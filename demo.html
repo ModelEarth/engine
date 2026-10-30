@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claude Voice Demo</title>
+  <style>
+    html, body { margin: 0; height: 100%; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; background: #0b0f1a; }
+    #stage { min-height: 100vh; display: grid; place-items: center; color: #f3f5fa; text-align: center; padding: 24px; box-sizing: border-box; }
+    h1 { font-weight: 600; letter-spacing: -0.02em; font-size: clamp(28px, 5vw, 52px); margin: 0 0 12px; }
+    p { margin: 6px 0; opacity: .82; font-size: 17px; }
+    kbd { padding: 2px 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,.3); background: rgba(255,255,255,.08); font: inherit; }
+  </style>
+</head>
+<body>
+  <div id="stage">
+    <div>
+      <h1>Talk to Claude</h1>
+      <p>Tap <b>Enable voice</b>, then say <kbd>Ok Claude</kbd> and ask anything.</p>
+      <p>Say <kbd>Thanks</kbd> when you're done. Press <kbd>Esc</kbd> to interrupt.</p>
+    </div>
+  </div>
+  <script src="claude-voice.js" data-target="#stage" defer></script>
+</body>
+</html>

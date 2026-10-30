@@ -11,6 +11,10 @@ env/*
 .env
 .env.local
 .env.production
+.env.*
+!.env.example
+.dev.vars
+.wrangler/
 
 # Logs
 *.log

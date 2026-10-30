@@ -1,0 +1,29 @@
+// Example wrangler config. Place it in the folder ABOVE your webroot, e.g.
+//
+//   my-site/
+//     wrangler.jsonc        <- this file
+//     .env                  <- keys (outside the webroot, never uploaded)
+//     public/               <- your webroot
+//       index.html
+//       engine/             <- this submodule
+//
+// If you already have a Worker, skip "main" here and import handleClaudeVoice instead.
+{
+  "name": "my-site",
+  "main": "public/engine/worker/claude-voice-api.js",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS",
+    // Send the API path to the Worker before asset matching.
+    "run_worker_first": ["/api/*"]
+  },
+  "vars": {
+    "CLAUDE_MODEL": "claude-opus-5-5"
+    // "ALLOWED_ORIGINS": "https://www.example.com,https://example.com"
+  }
+  // Optional per-IP rate limit (recommended for a public page):
+  // ,"ratelimits": [
+  //   { "name": "CLAUDE_VOICE_LIMITER", "namespace_id": "1001", "simple": { "limit": 20, "period": 60 } }
+  // ]
+}
