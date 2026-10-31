@@ -1371,7 +1371,11 @@
     if (filterCatch) filterCatch.after(panel); else host.appendChild(panel);
     wordField.setBlur(true);
     close.focus({ preventScroll: true });
-    if (filterCatch) panel.scrollIntoView({ block: 'nearest', behavior: reducedMotion ? 'auto' : 'smooth' });
+    // Once the page has made room for it (project/goals raises its column), and only when it's out of view.
+    if (filterCatch) setTimeout(() => {
+      const r = panel.getBoundingClientRect();
+      if (r.top < 0 || r.top > innerHeight - 160) window.scrollBy({ top: r.top - innerHeight * 0.3, behavior: reducedMotion ? 'auto' : 'smooth' });
+    }, 350);
     try {
       await loadScriptOnce(KEYS_PAGE + 'providers.js', () => window.KeyManagerProviders);
       await loadScriptOnce(KEYS_PAGE + 'key-manager.js', () => window.KeyManager);
