@@ -45,8 +45,9 @@
  * this browser's localStorage and sent with each request, so it's entered once for every tab on the site.
  * When the site's keys can't answer (or no passphrase was entered), an AI key saved on the /keys page in this browser
  * (Claude, Gemini, OpenAI, xAI, Groq, Perplexity or Pollinations, tried in that order) is used instead; without one,
- * the note says it can be added there.
- * API: window.ClaudeVoice.{start, stop, say, end, interrupt, setMood, clearWords, pauseAudio, pauseMotion, on}
+ * the note says it can be added there, and the Large Words ask for one, with a "Set My Keys" button that opens the
+ * /keys page's list of keys on this page (keys/key-manager.js, loaded then).
+ * API: window.ClaudeVoice.{start, stop, say, end, interrupt, setMood, clearWords, pauseAudio, pauseMotion, openKeys, on}
  */
 (function () {
   'use strict';
@@ -559,7 +560,7 @@
   }
 
   function WordField(host) {
-    if (ds.words === 'false') return { begin() {}, sentence() {}, summary() {}, finish() {}, clear() {}, setPaused() {}, setEnabled() {}, off: true };
+    if (ds.words === 'false') return { begin() {}, sentence() {}, summary() {}, phrases() {}, finish() {}, clear() {}, setPaused() {}, setEnabled() {}, setBlur() {}, off: true };
     const MAX_LIVE = 28;
     // Size steps as fractions of the target's span, from whisper to headline; each word lands on one at random, nudged up by its score.
     const SIZE_STEPS = [0.02, 0.032, 0.05, 0.078, 0.115, 0.16];
@@ -567,7 +568,8 @@
     const TOP = 90; // words and the statement stay this far below the target's top, clear of headers and controls there
     const layer = document.createElement('div');
     layer.className = 'claude-voice-words';
-    layer.setAttribute('aria-hidden', 'true'); // the captions already carry the words for screen readers
+    // Each word and statement is aria-hidden, since the captions already carry them for screen readers. A button among
+    // them (phrases()) isn't.
     // z-index 1: over content without one, such as a map's iframe (data-words-stay), and under its controls, which have their own.
     Object.assign(layer.style, { position: host === document.body ? 'fixed' : 'absolute', inset: '0', pointerEvents: 'none', overflow: 'hidden', zIndex: '1' });
     host.appendChild(layer);
@@ -582,6 +584,10 @@
         .stmt .sep { margin: 0 .6em; opacity: .55; }
         .stmt.amid { text-align: center; }
         .stmt.tr { text-align: right; }
+        .w.act { pointer-events: auto; cursor: pointer; border: 0; margin: 0; padding: .3em .7em .36em; border-radius: .45em; color: #fff;
+                 background: color-mix(in srgb, var(--cv-c3, #2563eb) 55%, #1d4ed8); box-shadow: 0 10px 40px rgba(0,0,0,.35); text-shadow: none; }
+        .w.act:hover { filter: brightness(1.12); }
+        .w.act:focus-visible { outline: 3px solid #fff; outline-offset: 4px; }
       </style>
       <div class="field"></div>`;
     const field = root.querySelector('.field');
@@ -604,8 +610,8 @@
     // How much a word (or word group) matters: its keyword score, plus a lift once Claude's summary names it.
     const weightOf = (o) => o.score + (o.lower.split(/\s+/).some((w) => keyWords.has(w)) ? 1.5 : 0);
 
-    function makeWord(text) {
-      const el = document.createElement('div');
+    function makeWord(text, tag = 'div') {
+      const el = document.createElement(tag);
       el.className = 'w';
       [...text].forEach((ch) => { const s = document.createElement('span'); s.textContent = ch; el.appendChild(s); });
       return el;
@@ -674,11 +680,18 @@
       // Mostly minor words pass through: they fade away while the rest are still arriving.
       const o = { ...k, transient: !k.keep && Math.random() < 0.45 - imp * 0.3 };
       let step = k.step ?? clamp(Math.round(imp * 2 + rand(-1.5, 3.6)), 0, SIZE_STEPS.length - 1);
-      const jitter = rand(0.88, 1.12), el = makeWord(k.word);
+      const jitter = rand(0.88, 1.12), el = makeWord(k.word, k.action ? 'button' : 'div');
+      if (k.action) {
+        el.classList.add('act');
+        el.type = 'button';
+        el.addEventListener('click', k.action);
+      } else el.setAttribute('aria-hidden', 'true');
       obstacles = findObstacles();
       el.style.visibility = 'hidden';
       field.appendChild(el);
       // Try one size smaller rather than crowd; if there's still no clear spot, the lighter of this word and those in the way gives way.
+      // Kept words (phrases()) never push each other out: they shrink further to find a spot clear of controls and of each
+      // other, and otherwise overlap.
       let spot;
       for (let shrunk = 0; ; shrunk++) {
         el.style.fontSize = clamp(span() * SIZE_STEPS[step] * jitter, 13, 200) + 'px';
@@ -686,15 +699,17 @@
         // A long word group at a large size could be wider than the target: it shrinks to fit.
         const room = layer.clientWidth * 0.9;
         if (el.offsetWidth > room) el.style.fontSize = Math.max(13, parseFloat(el.style.fontSize) * room / el.offsetWidth) + 'px';
-        spot = findSpot(el.offsetWidth, el.offsetHeight, scatter(el.offsetWidth, el.offsetHeight, 60));
-        if (!spot || !spot.cost || shrunk || !step) break;
+        spot = findSpot(el.offsetWidth, el.offsetHeight, scatter(el.offsetWidth, el.offsetHeight, o.keep ? 160 : 60));
+        if (step <= (k.minStep || 0) || (spot && !spot.cost)) break;
+        if (!o.keep && (!spot || shrunk)) break;
+        if (o.keep && spot && shrunk && !spot.under.some((u) => u.keep)) break;
         step--;
       }
-      if (!spot || spot.under.some((u) => weightOf(u) > weightOf(o))) { el.remove(); return; }
-      spot.under.forEach((u) => drop(u));
+      if (!spot || (!o.keep && spot.under.some((u) => weightOf(u) > weightOf(o)))) { el.remove(); return; }
+      spot.under.filter((u) => !(o.keep && u.keep)).forEach((u) => drop(u));
       Object.assign(el.style, { left: spot.box.x + 'px', top: spot.box.y + 'px', visibility: '' });
       // Transparency varies, from faint to solid; weightier words lean solid.
-      el.style.opacity = clamp(rand(0.3, 0.8) + imp * 0.35, 0.3, 1).toFixed(2);
+      el.style.opacity = k.action ? '1' : clamp(rand(0.3, 0.8) + imp * 0.35, 0.3, 1).toFixed(2);
       reveal(el);
       if (!reducedMotion) el.animate([{ translate: '0 0' }, { translate: `${rand(-16, 16).toFixed(1)}px ${rand(-12, 12).toFixed(1)}px` }],
         { duration: rand(5000, 9000), direction: 'alternate', iterations: Infinity, easing: 'ease-in-out' });
@@ -709,6 +724,7 @@
     function showStatement(picks) {
       const el = document.createElement('div');
       el.className = 'stmt';
+      el.setAttribute('aria-hidden', 'true');
       el.style.fontSize = clamp(span() * 0.015, 12, 17) + 'px';
       picks.forEach((p, i) => {
         if (i) { const sep = document.createElement('span'); sep.className = 'sep'; sep.textContent = '·'; el.appendChild(sep); }
@@ -772,12 +788,21 @@
         keyWords = new Set((list || []).join(' ').toLowerCase().replace(/’/g, "'").replace(/'s\b/g, '').split(/[^a-z0-9']+/).filter(Boolean));
       },
       /** Words of the widget's own, such as what to do while a key is needed: shown large, one after another, and kept
-          until the next reply (or clear). */
-      phrases(list) {
+          until the next reply (or clear). action: { label, onClick }, a button shown large among them, second, while
+          there's still room for it at a size that reads as one. */
+      phrases(list, action) {
         this.begin();
         if (!active) return;
         pinned = true;
-        list.forEach((text, i) => timers.push(setTimeout(() => show({ word: text, lower: text.toLowerCase(), index: 0, score: 2, keep: true, step: i ? 3 : 4 }), 200 + i * 900)));
+        const items = list.map((text, i) => ({ word: text, step: i ? 3 : 4, minStep: 1 }));
+        if (action) items.splice(1, 0, { word: action.label, step: 3, minStep: 2, action: action.onClick });
+        items.forEach((k, i) => timers.push(setTimeout(() => show({ ...k, lower: k.word.toLowerCase(), index: 0, score: 2, keep: true }), 200 + i * 900)));
+      },
+      /** Blurred (true) behind a panel laid over them, such as the keys panel; its button can't be clicked meanwhile. */
+      setBlur(on) {
+        layer.style.transition = 'filter .4s ease';
+        layer.style.filter = on ? 'blur(10px)' : '';
+        field.inert = !!on;
       },
       /** The reply has been spoken (or cut short): the big words stay, and the summary joins them as a small statement. */
       finish() {
@@ -1289,6 +1314,85 @@
       return crypto.subtle.decrypt({ name: 'AES-GCM', iv }, cryptoKey, data);
     }).then((plain) => new TextDecoder().decode(plain));
   }
+
+  // "Set My Keys", the button among the Large Words while a key is needed, opens the /keys page's list of keys
+  // (keys/key-manager.js, its providers.js and style.css, loaded the first time) on the left of this page, with the words
+  // blurred behind it. A page with #earthFilterCatch (project/goals) holds it there, after its tabs, whose content steps
+  // aside (goals.css). Elsewhere it's laid over the target's left 2/3, lined up as project/goals' #goalsMain is.
+  let keysPanel = null;
+  const loadScriptOnce = (src, loaded) => (loaded() ? Promise.resolve() : new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error(`The Keys page’s ${src.split('/').pop()} didn’t load.`));
+    document.head.appendChild(s);
+  }));
+  function addKeysStyles() {
+    if (!document.querySelector(`link[href="${KEYS_PAGE}style.css"]`)) {
+      document.head.appendChild(Object.assign(document.createElement('link'), { rel: 'stylesheet', href: KEYS_PAGE + 'style.css' }));
+    }
+    if (document.getElementById('claude-voice-keys-style')) return;
+    const style = document.createElement('style');
+    style.id = 'claude-voice-keys-style';
+    style.textContent = `
+      .claude-voice-keys { box-sizing: border-box; padding: 16px 18px 20px; border-radius: 12px; overflow: auto;
+        background: var(--key-bg, #fff); color: var(--key-text, #111827); font-family: var(--key-font, system-ui, sans-serif);
+        box-shadow: 0 12px 48px rgba(0, 0, 0, .35); }
+      .claude-voice-keys.over { position: absolute; z-index: 2147482000; top: 24px; max-height: calc(100% - 96px);
+        left: max(16px, calc((100% - 1120px) / 2 + 16px)); width: calc((min(100%, 1120px) - 32px) * 2 / 3); }
+      body > .claude-voice-keys.over { position: fixed; top: 80px; max-height: calc(100vh - 160px); }
+      .claude-voice-keys.inpage { margin-bottom: var(--gap, 16px); }
+      @media (max-width: 700px) { .claude-voice-keys.over { width: calc(100% - 32px); } }
+      .claude-voice-keys-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+      .claude-voice-keys-head h2 { margin: 0; padding: 0; border: 0; font-size: 22px; font-weight: 650; line-height: 1.25; color: inherit; }
+      .claude-voice-keys-head p { margin: 4px 0 0; font-size: 14px; color: var(--key-text-muted, #6b7280); }
+      .claude-voice-keys-close { flex: none; width: 34px; height: 34px; border: 1px solid var(--key-border, #e5e7eb); border-radius: 50%;
+        background: var(--key-bg-subtle, #f9fafb); color: inherit; font-size: 20px; line-height: 1; cursor: pointer; }
+      .claude-voice-keys-close:hover { background: var(--key-bg-hover, #f3f4f6); }`;
+    document.head.appendChild(style);
+  }
+  async function openKeysPanel() {
+    if (keysPanel) { keysPanel.querySelector('.claude-voice-keys-close').focus(); return; }
+    const filterCatch = document.getElementById('earthFilterCatch');
+    const panel = keysPanel = document.createElement('section');
+    panel.className = 'claude-voice-keys ' + (filterCatch ? 'inpage' : 'over');
+    panel.setAttribute('aria-label', 'Set My Keys');
+    panel.innerHTML = `
+      <div class="claude-voice-keys-head">
+        <div><h2>Set My Keys</h2><p>Add an AI key (Claude, Gemini, OpenAI and others) to talk here. Your keys stay in this browser.</p></div>
+        <button type="button" class="claude-voice-keys-close" aria-label="Close" title="Close">×</button>
+      </div>
+      <div class="claude-voice-keys-list">Loading…</div>`;
+    const close = panel.querySelector('.claude-voice-keys-close'), list = panel.querySelector('.claude-voice-keys-list');
+    close.addEventListener('click', closeKeysPanel);
+    panel.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeKeysPanel(); } });
+    addKeysStyles();
+    if (filterCatch) filterCatch.after(panel); else host.appendChild(panel);
+    wordField.setBlur(true);
+    close.focus({ preventScroll: true });
+    if (filterCatch) panel.scrollIntoView({ block: 'nearest', behavior: reducedMotion ? 'auto' : 'smooth' });
+    try {
+      await loadScriptOnce(KEYS_PAGE + 'providers.js', () => window.KeyManagerProviders);
+      await loadScriptOnce(KEYS_PAGE + 'key-manager.js', () => window.KeyManager);
+      if (keysPanel !== panel) return; // closed while loading
+      window.KeyManager.migrateFromLegacy();
+      window.KeyManager.init(list);
+    } catch (e) {
+      list.textContent = `${e.message} Add your key on the Keys page (${KEYS_PAGE}) instead.`;
+    }
+  }
+  // Once a key that can talk here is saved, the words asking for one go.
+  async function closeKeysPanel() {
+    if (!keysPanel) return;
+    keysPanel.remove();
+    keysPanel = null;
+    wordField.setBlur(false);
+    const own = await savedKey();
+    if (own) {
+      wordField.clear();
+      ui.note(`Your ${OWN_LABEL[own.name]} key is set. Ask again to talk with it.`, 8000);
+    }
+  }
   ui.setVoiceMode(voiceMode);
 
   // Text Output, also in the settings panel: which kinds of text show (data-text-output, then this browser's choices).
@@ -1619,7 +1723,7 @@
       } else {
         if (ownFailed) msg += ` Update it on the Keys page (${KEYS_PAGE}).`;
         else if (err.keys || err.passphrase) msg += ` ${err.passphrase ? 'Or add' : 'You can add'} your own AI key (Claude, Gemini, OpenAI and others) on the Keys page (${KEYS_PAGE}).`;
-        if (ownFailed || err.keys || err.passphrase) wordField.phrases(KEY_PHRASES); // a key is needed: say so in the Large Words too
+        if (ownFailed || err.keys || err.passphrase) wordField.phrases(KEY_PHRASES, { label: 'Set My Keys', onClick: openKeysPanel }); // a key is needed: say so in the Large Words too
         const asked = history.pop();
         ui.note(msg, 12000);
         if (err.passphrase) {
@@ -1799,6 +1903,8 @@
     /** Pause (true) or resume (false) Claude's voice, or its motion: the canvas and floating words. */
     pauseAudio: (p = true) => setAudioPaused(p),
     pauseMotion: (p = true) => setMotionPaused(p),
+    /** Open the /keys page's list of keys on this page, as the "Set My Keys" button does. */
+    openKeys: () => openKeysPanel(),
     end: () => endConversation(true),
     /** Feed text as if it were spoken (useful for testing and for custom inputs). */
     say(text) { if (mode === 'off' || mode === 'wake' || mode === 'error') { const m = text.match(WAKE_RE); if (m) return beginConversation(text.slice(m.index + m[0].length).trim()); return beginConversation(text, true); } if (mode === 'speaking' || mode === 'thinking') interrupt(); handleUtterance(text); },
