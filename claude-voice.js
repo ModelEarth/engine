@@ -43,6 +43,8 @@
  * No keys live in this file. It talks only to your own endpoint (local bridge or Cloudflare Worker).
  * When the Worker asks for the site's passphrase (TEAM_PASSPHRASE), a field for it shows. The passphrase is kept in
  * this browser's localStorage and sent with each request, so it's entered once for every tab on the site.
+ * When the site's keys can't answer (or no passphrase was entered), a Claude or Gemini key saved on the /keys page in this
+ * browser is used instead; without one, the note says it can be added there.
  * API: window.ClaudeVoice.{start, stop, say, end, interrupt, setMood, clearWords, pauseAudio, pauseMotion, on}
  */
 (function () {
@@ -1222,6 +1224,40 @@
   const PASS_KEY = 'team-passphrase'; // shared/passphrase.js's PASSPHRASE_STORAGE_KEY, which other pages on the site also read
   let lockedText = ''; // the question that waited for the passphrase
   function passphrase() { try { return localStorage.getItem(PASS_KEY) || ''; } catch (e) { return ''; } }
+
+  // The visitor's own Claude or Gemini key from the /keys page (keys/key-manager.js), for when the site's keys can't
+  // answer. That page keeps keys in localStorage "settings_api-keys", either plain or encrypted with an AES key it keeps
+  // in IndexedDB ("km-store"). "rsa:" ones only a server could read, so they're skipped.
+  const KEYS_PAGE = '/keys/';
+  const OWN_LABEL = { anthropic: 'Claude', google: 'Gemini' };
+  let ownKey = null;      // { name, key } while this page answers with the visitor's own key
+  let failedOwnKey = '';  // a saved key that already failed, so it isn't tried again until it's changed
+  async function savedKey() {
+    let saved;
+    try { saved = JSON.parse(localStorage.getItem('settings_api-keys') || '{}'); } catch (e) { return null; }
+    for (const name of Object.keys(OWN_LABEL)) {
+      const v = saved && saved[name];
+      if (typeof v !== 'string' || !v || v.startsWith('rsa:')) continue;
+      const key = /^[A-Za-z0-9+/]+=*:[A-Za-z0-9+/]+=*$/.test(v) ? await decryptSavedKey(v).catch(() => '') : v;
+      if (key && key !== failedOwnKey) return { name, key };
+    }
+    return null;
+  }
+  function decryptSavedKey(v) {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open('km-store', 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('keys'); // as key-manager.js opens it
+      req.onerror = () => reject(req.error);
+      req.onsuccess = () => {
+        const db = req.result, get = db.transaction('keys', 'readonly').objectStore('keys').get('browser-key');
+        get.onerror = () => { db.close(); reject(get.error); };
+        get.onsuccess = () => { db.close(); if (get.result) resolve(get.result); else reject(new Error('No browser key')); };
+      };
+    }).then((cryptoKey) => {
+      const [iv, data] = v.split(':').map((s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0)));
+      return crypto.subtle.decrypt({ name: 'AES-GCM', iv }, cryptoKey, data);
+    }).then((plain) => new TextDecoder().decode(plain));
+  }
   ui.setVoiceMode(voiceMode);
 
   // Text Output, also in the settings panel: which kinds of text show (data-text-output, then this browser's choices).
@@ -1492,15 +1528,17 @@
     };
 
     const thisRun = startRun();
+    let retry = false; // with the visitor's own key, once the site's keys couldn't answer
     try {
       const res = await fetch(cfg.endpoint, {
         method: 'POST', signal: ctl.signal,
-        headers: { 'content-type': 'application/json', ...(passphrase() && { 'x-team-passphrase': passphrase() }) },
+        headers: { 'content-type': 'application/json',
+          ...(ownKey ? { 'x-provider-name': ownKey.name, 'x-provider-key': ownKey.key } : passphrase() && { 'x-team-passphrase': passphrase() }) },
         body: JSON.stringify({ messages: history, output: { conversation: textOut.conversation, important: textOut.important, sets: textOut.words && textOut.sets && !wordField.off } }),
       });
       if (!res.ok || !res.body) {
         const body = await res.json().catch(() => ({}));
-        throw Object.assign(new Error(body.error || `Endpoint replied ${res.status}`), { passphrase: res.status === 401 && body.passphrase });
+        throw Object.assign(new Error(body.error || `Endpoint replied ${res.status}`), { passphrase: res.status === 401 && body.passphrase, keys: !!body.keys });
       }
       const reader = res.body.getReader(), dec = new TextDecoder();
       let buf = '';
@@ -1514,7 +1552,7 @@
           if (!line) continue;
           let evt; try { evt = JSON.parse(line); } catch { continue; }
           if (evt.t === 'text') take(evt.v);
-          else if (evt.t === 'error') throw new Error(evt.v);
+          else if (evt.t === 'error') throw Object.assign(new Error(evt.v), { keys: !!evt.keys }); // keys: the site's keys all failed
           else if (evt.t === 'note') ui.note(evt.v, 15000); // e.g. why Gemini is answering instead of Claude
           else if (evt.t === 'agent') { agent = evt.v; showAgent(); }
           else if (evt.t === 'tool') { thisRun.tools++; thisRun.activity = `${evt.v.name} ${evt.v.target || ''}`.trim(); showAgent(); }
@@ -1534,23 +1572,34 @@
     } catch (err) {
       if (ctl.signal.aborted) return;
       console.warn('[claude-voice]', err);
-      const msg = /Failed to fetch|NetworkError|Load failed/i.test(err.message)
+      let msg = /Failed to fetch|NetworkError|Load failed/i.test(err.message)
         ? (isLocal ? 'I can’t reach the local bridge. Start it with: node engine/server/local-bridge.mjs' : 'I can’t reach the server right now.')
         : err.message;
+      if (ownKey) { msg += ` Update it on the Keys page (${KEYS_PAGE}).`; failedOwnKey = ownKey.key; ownKey = null; }
+      // The site's keys all failed, or this visitor has no passphrase: answer with their own key from the Keys page.
+      const own = err.keys || (err.passphrase && !passphrase()) ? await savedKey() : null;
       endRun(thisRun, 'error', msg);
-      const asked = history.pop();
-      ui.note(msg, 12000);
-      if (err.passphrase) {
-        // The stored passphrase (if any) didn't match: forget it, and ask the question again once a new one is entered.
-        try { localStorage.removeItem(PASS_KEY); } catch (e) { /* storage blocked */ }
-        lockedText = asked && asked.role === 'user' ? asked.content : '';
-        ui.askPassphrase();
-      } else enqueueSpeech('Sorry, I couldn’t reach Claude just then.');
+      if (own) {
+        ownKey = own;
+        ui.note(err.keys ? `${msg} Trying your ${OWN_LABEL[own.name]} key from the Keys page.` : `Using your ${OWN_LABEL[own.name]} key from the Keys page.`, 12000);
+        retry = true;
+      } else {
+        if (err.keys || err.passphrase) msg += ` ${err.passphrase ? 'Or add' : 'You can add'} your own Claude or Gemini key on the Keys page (${KEYS_PAGE}).`;
+        const asked = history.pop();
+        ui.note(msg, 12000);
+        if (err.passphrase) {
+          // The stored passphrase (if any) didn't match: forget it, and ask the question again once a new one is entered.
+          try { localStorage.removeItem(PASS_KEY); } catch (e) { /* storage blocked */ }
+          lockedText = asked && asked.role === 'user' ? asked.content : '';
+          ui.askPassphrase();
+        } else enqueueSpeech('Sorry, I couldn’t reach Claude just then.');
+      }
     } finally {
       if (abortCtl === ctl) abortCtl = null;
       streamDone = true;
-      if (!speaking && !speakQueue.length) afterSpeech();
+      if (!retry && !speaking && !speakQueue.length) afterSpeech();
     }
+    if (retry) return askClaude(); // the question is still the last in history
   }
 
   // --- the settings panel's Agent section: which agent answers (sent with each reply, and by the local bridge's
