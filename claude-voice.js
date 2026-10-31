@@ -568,7 +568,8 @@
     const layer = document.createElement('div');
     layer.className = 'claude-voice-words';
     layer.setAttribute('aria-hidden', 'true'); // the captions already carry the words for screen readers
-    Object.assign(layer.style, { position: host === document.body ? 'fixed' : 'absolute', inset: '0', pointerEvents: 'none', overflow: 'hidden', zIndex: '0' });
+    // z-index 1: over content without one, such as a map's iframe (data-words-stay), and under its controls, which have their own.
+    Object.assign(layer.style, { position: host === document.body ? 'fixed' : 'absolute', inset: '0', pointerEvents: 'none', overflow: 'hidden', zIndex: '1' });
     host.appendChild(layer);
     const root = layer.attachShadow({ mode: 'open' });
     root.innerHTML = `
@@ -585,6 +586,7 @@
       <div class="field"></div>`;
     const field = root.querySelector('.field');
     let live = [], stmt = null, seen = new Set(), summaryList = null, keyWords = new Set(), active = false, timers = [], pageTimer = null, still = false;
+    let pinned = false; // phrases() is showing words of the widget's own, which stay until the next reply
     let enabled = true; // Large Words in the settings panel's Text Output
 
     // The target's own content (e.g. the demo's heading) steps aside while words are showing.
@@ -633,11 +635,27 @@
       fadeOut(o.el, delay);
     }
     const overlap = (a, b) => a.x - PAD < b.x + b.w && b.x < a.x + a.w + PAD && a.y - PAD < b.y + b.h && b.y < a.y + a.h + PAD;
+    // Controls laid over the target, such as a map's buttons and panels and this widget's own captions: positioned, with
+    // a z-index above the words. Words keep clear of them. Found again as each word is placed, since captions and notes
+    // grow; anything covering most of the target is a container rather than a control, so it doesn't count.
+    let obstacles = [];
+    function findObstacles() {
+      if (host === document.body) return [];
+      const L = layer.getBoundingClientRect();
+      return [...host.querySelectorAll('*')].filter((el) => {
+        if (el === layer) return false;
+        const cs = getComputedStyle(el);
+        return cs.position !== 'static' && parseInt(cs.zIndex, 10) > 1 && cs.visibility !== 'hidden';
+      }).map((el) => el.getBoundingClientRect())
+        .filter((r) => r.width > 0 && r.height > 0 && r.width * r.height < L.width * L.height * 0.4)
+        .map((r) => ({ x: r.left - L.left, y: r.top - L.top, w: r.width, h: r.height }));
+    }
     // Of the spots offered, keeps the first clear one, otherwise the one covering the fewest and lightest words.
     function findSpot(w, h, spots) {
       let best = null;
       for (const s of spots) {
         const box = { x: Math.max(0, s.x), y: Math.max(TOP, s.y), w, h };
+        if (obstacles.some((b) => overlap(box, b))) continue;
         if (stmt && stmt.box && overlap(box, stmt.box)) continue;
         const under = live.filter((o) => overlap(box, o.box));
         const cost = under.reduce((a, o) => a + 1 + weightOf(o), 0);
@@ -654,9 +672,10 @@
       if (!active) return;
       const imp = clamp(k.score / 1.8, 0, 1);
       // Mostly minor words pass through: they fade away while the rest are still arriving.
-      const o = { ...k, transient: Math.random() < 0.45 - imp * 0.3 };
-      let step = clamp(Math.round(imp * 2 + rand(-1.5, 3.6)), 0, SIZE_STEPS.length - 1);
+      const o = { ...k, transient: !k.keep && Math.random() < 0.45 - imp * 0.3 };
+      let step = k.step ?? clamp(Math.round(imp * 2 + rand(-1.5, 3.6)), 0, SIZE_STEPS.length - 1);
       const jitter = rand(0.88, 1.12), el = makeWord(k.word);
+      obstacles = findObstacles();
       el.style.visibility = 'hidden';
       field.appendChild(el);
       // Try one size smaller rather than crowd; if there's still no clear spot, the lighter of this word and those in the way gives way.
@@ -697,6 +716,7 @@
       });
       Object.assign(el.style, { left: '0', top: '0', visibility: 'hidden' });
       field.appendChild(el);
+      obstacles = findObstacles();
       const W = layer.clientWidth, H = layer.clientHeight;
       if (el.offsetWidth > W * 0.9) el.style.maxWidth = W * 0.6 + 'px'; // a long summary wraps into a narrower block
       else el.style.whiteSpace = 'nowrap';
@@ -714,7 +734,7 @@
       stmt = { el, box: spot.box };
     }
     function clear() {
-      active = false; summaryList = null;
+      active = false; pinned = false; summaryList = null;
       timers.forEach(clearTimeout); timers = [];
       [...live.map((o) => o.el), ...(stmt ? [stmt.el] : [])].forEach((el, i) => fadeOut(el, i * 40));
       live = []; stmt = null;
@@ -727,7 +747,7 @@
         timers.forEach(clearTimeout); timers = [];
         live.forEach((o, i) => fadeOut(o.el, i * 30));
         if (stmt) fadeOut(stmt.el);
-        live = []; stmt = null;
+        live = []; stmt = null; pinned = false;
         seen = new Set(); summaryList = null; keyWords = new Set(); active = enabled && !otherDisplay();
         if (active) { clearTimeout(pageTimer); showPage(false); }
       },
@@ -751,9 +771,17 @@
         summaryList = list;
         keyWords = new Set((list || []).join(' ').toLowerCase().replace(/’/g, "'").replace(/'s\b/g, '').split(/[^a-z0-9']+/).filter(Boolean));
       },
+      /** Words of the widget's own, such as what to do while a key is needed: shown large, one after another, and kept
+          until the next reply (or clear). */
+      phrases(list) {
+        this.begin();
+        if (!active) return;
+        pinned = true;
+        list.forEach((text, i) => timers.push(setTimeout(() => show({ word: text, lower: text.toLowerCase(), index: 0, score: 2, keep: true, step: i ? 3 : 4 }), 200 + i * 900)));
+      },
       /** The reply has been spoken (or cut short): the big words stay, and the summary joins them as a small statement. */
       finish() {
-        if (!active) return;
+        if (!active || pinned) return;
         active = false;
         timers.forEach(clearTimeout); timers = [];
         const picks = summaryList || [];
@@ -1230,6 +1258,7 @@
   // fails, the next saved one is tried. That page keeps keys in localStorage "settings_api-keys", either plain or encrypted with an AES key it keeps
   // in IndexedDB ("km-store"). "rsa:" ones only a server could read, so they're skipped.
   const KEYS_PAGE = '/keys/';
+  const KEY_PHRASES = ['Please enter your LLM Key', 'Get Started', 'One Big Adventure']; // floated as Large Words while a key is needed
   // The /keys page's provider ids that can hold a conversation (worker/claude-voice-api.js OWN_PROVIDERS), in order.
   const OWN_LABEL = { anthropic: 'Claude', google: 'Gemini', openai: 'OpenAI', xai: 'xAI', groq: 'Groq', perplexity: 'Perplexity', pollinations: 'Pollinations' };
   let ownKey = null;              // { name, key } while this page answers with the visitor's own key
@@ -1590,6 +1619,7 @@
       } else {
         if (ownFailed) msg += ` Update it on the Keys page (${KEYS_PAGE}).`;
         else if (err.keys || err.passphrase) msg += ` ${err.passphrase ? 'Or add' : 'You can add'} your own AI key (Claude, Gemini, OpenAI and others) on the Keys page (${KEYS_PAGE}).`;
+        if (ownFailed || err.keys || err.passphrase) wordField.phrases(KEY_PHRASES); // a key is needed: say so in the Large Words too
         const asked = history.pop();
         ui.note(msg, 12000);
         if (err.passphrase) {

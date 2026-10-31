@@ -34,8 +34,8 @@ export const CLAUDE_VOICE_PATH = '/api/claude-voice';
 const OWN_PROVIDERS = {
   anthropic: { name: 'Claude' },
   google: { name: 'Gemini', who: 'Gemini' },
-  openai: { name: 'OpenAI', who: 'an OpenAI model', url: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini' },
-  xai: { name: 'xAI', who: 'Grok', url: 'https://api.x.ai/v1/chat/completions', model: 'grok-3-mini' },
+  openai: { name: 'OpenAI', who: 'an OpenAI model', url: 'https://api.openai.com/v1/chat/completions', model: 'gpt-6-luna' },
+  xai: { name: 'xAI', who: 'Grok', url: 'https://api.x.ai/v1/chat/completions', model: 'grok-4.3' },
   groq: { name: 'Groq', who: 'an open model on Groq', url: 'https://api.groq.com/openai/v1/chat/completions', model: 'llama-3.3-70b-versatile' },
   perplexity: { name: 'Perplexity', who: 'Perplexity', url: 'https://api.perplexity.ai/chat/completions', model: 'sonar' },
   pollinations: { name: 'Pollinations', who: 'a model on Pollinations', url: 'https://gen.pollinations.ai/v1/chat/completions', model: 'openai' },
