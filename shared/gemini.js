@@ -6,9 +6,6 @@ import { ProviderError, providerError } from './provider-error.js';
 // gemini-flash-latest follows Google's current Flash model, which is quick enough for speech.
 export const GEMINI_DEFAULT_MODEL = 'gemini-flash-latest';
 
-// The voice prompt introduces Claude; Gemini says who it is instead.
-export const asGemini = (system) => system.replace(/^You are Claude,/, 'You are Gemini, standing in for Claude,');
-
 // messages: [{ role: "user" | "assistant", content }], alternating and ending with the user (sanitizeMessages).
 // onUsage gets { input, cacheRead, output } once the reply is complete. A refusal throws a ProviderError.
 export async function streamGemini({ apiKey, model = GEMINI_DEFAULT_MODEL, system, messages, maxTokens = 700, signal, onText, onUsage }) {

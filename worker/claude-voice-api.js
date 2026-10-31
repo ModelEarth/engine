@@ -10,8 +10,9 @@
 //   ANTHROPIC_API_KEY  (secret) Claude answers first
 //   GEMINI_API_KEY     (secret) Gemini answers when Claude can't (no key, invalid key, no credits, busy).
 //                      Why one was skipped shows on the page as a note. When both fail, the error is marked
-//                      keys: true, and claude-voice.js tries the visitor's own Claude or Gemini key from the /keys
-//                      page, sent in the x-provider-name / x-provider-key headers. A request with the visitor's own
+//                      keys: true, and claude-voice.js tries the visitor's own key from the /keys page (Claude,
+//                      Gemini, OpenAI, xAI, Groq, Perplexity or Pollinations; OWN_PROVIDERS below), sent in the
+//                      x-provider-name / x-provider-key headers. A request with the visitor's own
 //                      key uses only that key and needs no TEAM_PASSPHRASE, since the site's keys aren't spent.
 //   CLAUDE_MODEL       (optional, default claude-opus-5-5)
 //   GEMINI_MODEL       (optional, default gemini-flash-latest)
@@ -20,14 +21,25 @@
 //                      asks for it on a 401 and keeps it in the browser, so only people given it use the key.
 //                      handleClaudeVoice(..., { passphrase: true }) requires one to be set.
 
-import { DEFAULT_MODEL, sanitizeMessages, systemPrompt } from '../shared/voice-prompt.js';
+import { DEFAULT_MODEL, sanitizeMessages, standingIn, systemPrompt } from '../shared/voice-prompt.js';
 import { streamClaude } from '../shared/anthropic.js';
-import { GEMINI_DEFAULT_MODEL, asGemini, streamGemini } from '../shared/gemini.js';
+import { GEMINI_DEFAULT_MODEL, streamGemini } from '../shared/gemini.js';
+import { streamOpenAICompat } from '../shared/openai-compat.js';
 import { PASSPHRASE_HEADER, passphraseRefusal } from '../shared/passphrase.js';
 
 export const CLAUDE_VOICE_PATH = '/api/claude-voice';
-// The /keys page's provider ids (keys/providers.js) this endpoint can answer with.
-const OWN_PROVIDERS = { anthropic: 'Claude', google: 'Gemini' };
+// The /keys page's provider ids (keys/providers.js) this endpoint can answer with, given the visitor's own key: name
+// (in messages), who (in the prompt, standing in for Claude), and for OpenAI-style services their chat URL and a quick
+// model suited to speech. The page's other providers (images, 3D, voices, search, data) can't hold a conversation.
+const OWN_PROVIDERS = {
+  anthropic: { name: 'Claude' },
+  google: { name: 'Gemini', who: 'Gemini' },
+  openai: { name: 'OpenAI', who: 'an OpenAI model', url: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini' },
+  xai: { name: 'xAI', who: 'Grok', url: 'https://api.x.ai/v1/chat/completions', model: 'grok-3-mini' },
+  groq: { name: 'Groq', who: 'an open model on Groq', url: 'https://api.groq.com/openai/v1/chat/completions', model: 'llama-3.3-70b-versatile' },
+  perplexity: { name: 'Perplexity', who: 'Perplexity', url: 'https://api.perplexity.ai/chat/completions', model: 'sonar' },
+  pollinations: { name: 'Pollinations', who: 'a model on Pollinations', url: 'https://gen.pollinations.ai/v1/chat/completions', model: 'openai' },
+};
 
 function corsHeaders(request, env) {
   const origin = request.headers.get('origin');
@@ -53,7 +65,7 @@ export async function handleClaudeVoice(request, env, ctx, { passphrase: require
   const ownName = String(request.headers.get('x-provider-name') || '').trim();
   const ownKey = String(request.headers.get('x-provider-key') || '').trim();
   const own = ownKey && OWN_PROVIDERS[ownName];
-  if (ownKey && !own) return Response.json({ error: `Only a Claude or Gemini key works here, not ${ownName || 'an unnamed provider'}.` }, { status: 400, headers: cors });
+  if (ownKey && !own) return Response.json({ error: `A ${ownName || 'key with no provider'} key can't hold a conversation here. Use a Claude, Gemini, OpenAI, xAI, Groq, Perplexity or Pollinations key.` }, { status: 400, headers: cors });
   if (!own) {
     if (!env.ANTHROPIC_API_KEY && !env.GEMINI_API_KEY) return Response.json({ error: 'Neither the ANTHROPIC_API_KEY nor the GEMINI_API_KEY secret is set.', keys: true }, { status: 500, headers: cors });
     const refusal = await passphraseRefusal(request, env, { required, to: 'talk to Claude' });
@@ -85,9 +97,11 @@ export async function handleClaudeVoice(request, env, ctx, { passphrase: require
   const claude = (apiKey) => ({ name: 'Claude', model: env.CLAUDE_MODEL || DEFAULT_MODEL,
     stream: (o) => streamClaude({ ...o, apiKey, model: env.CLAUDE_MODEL || DEFAULT_MODEL, system }) });
   const gemini = (apiKey) => ({ name: 'Gemini', model: env.GEMINI_MODEL || GEMINI_DEFAULT_MODEL,
-    stream: (o) => streamGemini({ ...o, apiKey, model: env.GEMINI_MODEL || GEMINI_DEFAULT_MODEL, system: asGemini(system) }) });
+    stream: (o) => streamGemini({ ...o, apiKey, model: env.GEMINI_MODEL || GEMINI_DEFAULT_MODEL, system: standingIn(system, 'Gemini') }) });
+  const openaiStyle = (p, apiKey) => ({ name: p.name, model: p.model,
+    stream: (o) => streamOpenAICompat({ ...o, provider: p.name, url: p.url, apiKey, model: p.model, system: standingIn(system, p.who) }) });
   const providers = own
-    ? [own === 'Claude' ? claude(ownKey) : gemini(ownKey)]
+    ? [own.name === 'Claude' ? claude(ownKey) : own.name === 'Gemini' ? gemini(ownKey) : openaiStyle(own, ownKey)]
     : [env.ANTHROPIC_API_KEY && claude(env.ANTHROPIC_API_KEY), env.GEMINI_API_KEY && gemini(env.GEMINI_API_KEY)].filter(Boolean);
   const whose = own ? 'your key from the Keys page' : 'the site\'s API key';
   const work = (async () => {

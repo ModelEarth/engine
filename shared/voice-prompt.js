@@ -59,6 +59,9 @@ The on-screen conversation text is hidden, usually because the person is present
 - Answer in one or two short sentences, unless they ask for more.
 - Say only the answer: no greeting, no restating the question, and no remarks about what you're doing or about to do.`;
 
+/** The prompt introduces Claude; another model answering says who it is instead. who: e.g. "Gemini", "an OpenAI model". */
+export const standingIn = (system, who) => system.replace(/^You are Claude,/, `You are ${who}, standing in for Claude,`);
+
 /** The system prompt for one request. output: { conversation, important, sets } from the page's Text Output choices. */
 export function systemPrompt(output) {
   return SYSTEM_PROMPT + (output?.conversation === false ? QUIET_RULES : '')

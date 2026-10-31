@@ -43,8 +43,9 @@
  * No keys live in this file. It talks only to your own endpoint (local bridge or Cloudflare Worker).
  * When the Worker asks for the site's passphrase (TEAM_PASSPHRASE), a field for it shows. The passphrase is kept in
  * this browser's localStorage and sent with each request, so it's entered once for every tab on the site.
- * When the site's keys can't answer (or no passphrase was entered), a Claude or Gemini key saved on the /keys page in this
- * browser is used instead; without one, the note says it can be added there.
+ * When the site's keys can't answer (or no passphrase was entered), an AI key saved on the /keys page in this browser
+ * (Claude, Gemini, OpenAI, xAI, Groq, Perplexity or Pollinations, tried in that order) is used instead; without one,
+ * the note says it can be added there.
  * API: window.ClaudeVoice.{start, stop, say, end, interrupt, setMood, clearWords, pauseAudio, pauseMotion, on}
  */
 (function () {
@@ -1225,13 +1226,14 @@
   let lockedText = ''; // the question that waited for the passphrase
   function passphrase() { try { return localStorage.getItem(PASS_KEY) || ''; } catch (e) { return ''; } }
 
-  // The visitor's own Claude or Gemini key from the /keys page (keys/key-manager.js), for when the site's keys can't
-  // answer. That page keeps keys in localStorage "settings_api-keys", either plain or encrypted with an AES key it keeps
+  // The visitor's own AI key from the /keys page (keys/key-manager.js), for when the site's keys can't answer. If one
+  // fails, the next saved one is tried. That page keeps keys in localStorage "settings_api-keys", either plain or encrypted with an AES key it keeps
   // in IndexedDB ("km-store"). "rsa:" ones only a server could read, so they're skipped.
   const KEYS_PAGE = '/keys/';
-  const OWN_LABEL = { anthropic: 'Claude', google: 'Gemini' };
-  let ownKey = null;      // { name, key } while this page answers with the visitor's own key
-  let failedOwnKey = '';  // a saved key that already failed, so it isn't tried again until it's changed
+  // The /keys page's provider ids that can hold a conversation (worker/claude-voice-api.js OWN_PROVIDERS), in order.
+  const OWN_LABEL = { anthropic: 'Claude', google: 'Gemini', openai: 'OpenAI', xai: 'xAI', groq: 'Groq', perplexity: 'Perplexity', pollinations: 'Pollinations' };
+  let ownKey = null;              // { name, key } while this page answers with the visitor's own key
+  const failedOwnKeys = new Set(); // saved keys that already failed, so they aren't tried again until changed
   async function savedKey() {
     let saved;
     try { saved = JSON.parse(localStorage.getItem('settings_api-keys') || '{}'); } catch (e) { return null; }
@@ -1239,7 +1241,7 @@
       const v = saved && saved[name];
       if (typeof v !== 'string' || !v || v.startsWith('rsa:')) continue;
       const key = /^[A-Za-z0-9+/]+=*:[A-Za-z0-9+/]+=*$/.test(v) ? await decryptSavedKey(v).catch(() => '') : v;
-      if (key && key !== failedOwnKey) return { name, key };
+      if (key && !failedOwnKeys.has(key)) return { name, key };
     }
     return null;
   }
@@ -1575,16 +1577,19 @@
       let msg = /Failed to fetch|NetworkError|Load failed/i.test(err.message)
         ? (isLocal ? 'I can’t reach the local bridge. Start it with: node engine/server/local-bridge.mjs' : 'I can’t reach the server right now.')
         : err.message;
-      if (ownKey) { msg += ` Update it on the Keys page (${KEYS_PAGE}).`; failedOwnKey = ownKey.key; ownKey = null; }
-      // The site's keys all failed, or this visitor has no passphrase: answer with their own key from the Keys page.
-      const own = err.keys || (err.passphrase && !passphrase()) ? await savedKey() : null;
+      const ownFailed = ownKey;
+      if (ownFailed) { failedOwnKeys.add(ownFailed.key); ownKey = null; }
+      // The site's keys all failed, this visitor has no passphrase, or their own key failed: answer with their (next)
+      // saved key from the Keys page.
+      const own = ownFailed || err.keys || (err.passphrase && !passphrase()) ? await savedKey() : null;
       endRun(thisRun, 'error', msg);
       if (own) {
         ownKey = own;
-        ui.note(err.keys ? `${msg} Trying your ${OWN_LABEL[own.name]} key from the Keys page.` : `Using your ${OWN_LABEL[own.name]} key from the Keys page.`, 12000);
+        ui.note(err.passphrase ? `Using your ${OWN_LABEL[own.name]} key from the Keys page.` : `${msg} Trying your ${OWN_LABEL[own.name]} key from the Keys page.`, 12000);
         retry = true;
       } else {
-        if (err.keys || err.passphrase) msg += ` ${err.passphrase ? 'Or add' : 'You can add'} your own Claude or Gemini key on the Keys page (${KEYS_PAGE}).`;
+        if (ownFailed) msg += ` Update it on the Keys page (${KEYS_PAGE}).`;
+        else if (err.keys || err.passphrase) msg += ` ${err.passphrase ? 'Or add' : 'You can add'} your own AI key (Claude, Gemini, OpenAI and others) on the Keys page (${KEYS_PAGE}).`;
         const asked = history.pop();
         ui.note(msg, 12000);
         if (err.passphrase) {
