@@ -46,7 +46,8 @@
  * When the site's keys can't answer (or no passphrase was entered), an AI key saved on the /keys page in this browser
  * (Claude, Gemini, OpenAI, xAI, Groq, Perplexity or Pollinations, tried in that order) is used instead; without one,
  * the note says it can be added there, and the Large Words ask for one, with a "Set My Keys" button that opens the
- * /keys page's list of keys on this page (keys/key-manager.js, loaded then).
+ * /keys page's list of keys on this page (keys/key-manager.js, loaded then). edit=keys in the page's hash (edit can list
+ * several, comma-separated) opens that list too.
  * API: window.ClaudeVoice.{start, stop, say, end, interrupt, setMood, clearWords, pauseAudio, pauseMotion, openKeys, on}
  */
 (function () {
@@ -1387,12 +1388,32 @@
     keysPanel.remove();
     keysPanel = null;
     wordField.setBlur(false);
+    setHashEdits(hashEdits().filter((e) => e !== 'keys'));
     const own = await savedKey();
     if (own) {
       wordField.clear();
       ui.note(`Your ${OWN_LABEL[own.name]} key is set. Ask again to talk with it.`, 8000);
     }
   }
+  // edit=keys in the page's hash (edit is a comma-separated list, e.g. #edit=keys) opens the keys panel too, once the
+  // page has loaded, so a page's own #earthFilterCatch is in place. Closing the panel takes keys out of the list, without
+  // a history entry (localsite's goHashQuiet() when it's loaded).
+  function hashEdits() {
+    const m = location.hash.match(/[#&]edit=([^&]*)/);
+    return m ? decodeURIComponent(m[1]).split(',').map((e) => e.trim().toLowerCase()).filter(Boolean) : [];
+  }
+  function setHashEdits(list) {
+    const m = location.hash.match(/[#&]edit=([^&]*)/);
+    if (!m || hashEdits().join(',') === list.join(',')) return;
+    if (typeof window.goHashQuiet === 'function') return window.goHashQuiet(list.length ? { edit: list.join(',') } : {}, list.length ? [] : ['edit']);
+    const rest = location.hash.slice(1).split('&').filter((p) => p && !p.startsWith('edit='));
+    if (list.length) rest.push('edit=' + list.join(','));
+    history.replaceState(history.state, '', location.pathname + location.search + (rest.length ? '#' + rest.join('&') : ''));
+  }
+  const keysFromHash = () => { if (hashEdits().includes('keys') && !keysPanel) openKeysPanel(); };
+  if (document.readyState === 'complete') setTimeout(keysFromHash);
+  else window.addEventListener('load', () => setTimeout(keysFromHash));
+  window.addEventListener('hashchange', keysFromHash);
   ui.setVoiceMode(voiceMode);
 
   // Text Output, also in the settings panel: which kinds of text show (data-text-output, then this browser's choices).
