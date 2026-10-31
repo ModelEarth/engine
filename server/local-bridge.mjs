@@ -4,7 +4,9 @@
 //   node server/local-bridge.mjs                 # API endpoint only (http://localhost:8790/api/claude-voice)
 //   node server/local-bridge.mjs --serve ../     # also serve your webroot at http://localhost:8790/
 //
-// LOCAL_BACKEND=cli (default) answers through the Claude Code CLI using your logged-in Claude account.
+// LOCAL_BACKEND=cli (default) answers through the Claude Code CLI using your logged-in Claude account. It can read the
+//   webroot's files (this submodule's parent folder) to answer questions about the site, but not change them or read anything
+//   outside it. CLI_READ_FILES=false answers without files.
 // LOCAL_BACKEND=api answers through the Claude API with ANTHROPIC_API_KEY from .env.
 // No npm dependencies; needs Node 18+.
 
@@ -14,7 +16,7 @@ import { readFileSync, existsSync, statSync, createReadStream, mkdtempSync } fro
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SYSTEM_PROMPT, DEFAULT_MODEL, sanitizeMessages, transcriptPrompt } from '../shared/voice-prompt.js';
+import { DEFAULT_MODEL, sanitizeMessages, systemPrompt, transcriptPrompt } from '../shared/voice-prompt.js';
 import { streamClaude } from '../shared/anthropic.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -65,7 +67,44 @@ function originAllowed(origin) {
 // ---------- backends ----------
 const cliWorkDir = mkdtempSync(path.join(tmpdir(), 'claude-voice-')); // empty dir: no CLAUDE.md, no project files
 
-function askCli(messages, onText, signal) {
+// File access for the CLI: the webroot (this submodule's parent folder), read-only.
+// - Only the Read, Glob and Grep tools exist in its sessions, so nothing can be written, edited or run.
+// - The only path allowed is inside the webroot. Links are checked by where they lead, so one pointing outside is refused.
+// - dontAsk refuses whatever isn't allowed, with no prompt, and settings files (yours, the project's) aren't loaded, so
+//   none of their allow rules widen this. Env and key files are denied even inside the webroot (Grep skips hidden files too).
+const WEBROOT = path.resolve(ROOT, '..');
+const READ_FILES = process.env.CLI_READ_FILES !== 'false';
+const SECRET_FILES = ['**/.env', '**/.env.*', '**/.envrc', '**/.dev.vars', '**/*.pem', '**/*.key'];
+const CLI_SETTINGS = JSON.stringify({ permissions: { allow: [`Read(/${WEBROOT}/**)`], deny: SECRET_FILES.map((p) => `Read(${p})`) } });
+// quiet: the page hides its conversation text (Text Output in claude-voice.js), so Claude looks first and says only the answer.
+const filesPrompt = (quiet) => `
+
+Files: you're running on the developer's own computer, in the folder holding this website's source files (${WEBROOT}).
+When a question is about this site, its pages, code, data or documentation, look at its files with Read, Glob and Grep, then answer from what you found.
+- You can only read. Files can't be changed, and nothing outside that folder is open to you. If a look is refused, say so briefly.
+- Never read or repeat secrets: env files, keys, tokens or passwords.
+${quiet
+    ? '- Look before you say anything, then give just the answer.'
+    : '- Before your first look, say in a few words what you\'re checking, so the person hears from you while you look. Then carry on once you\'ve looked.'}
+- Everything you write, before and after looking, is one spoken reply: the mood header only once, at the very start, and the summary only once, at the very end.
+- Tell what you found as you would in conversation: name files and folders plainly, without spelling out paths or reading code aloud.`;
+
+// The agent answering, as the settings panel's Agent section names it (also sent with each reply and from /status).
+const AGENT = BACKEND === 'api'
+  ? { name: 'Claude API', detail: 'API key from the env file', model: MODEL }
+  : { name: 'Claude Code CLI', detail: process.env.CLI_USE_API_KEY === 'true' ? 'API key from the env file' : 'your Claude login', model: MODEL,
+      files: READ_FILES ? `${path.basename(WEBROOT)} (read-only)` : null };
+
+// Requests being answered now (until their CLI process has exited) and how the last one went, for GET .../status.
+const running = new Map();
+let lastRun = null, runCount = 0;
+const inWebroot = (p) => (p && path.isAbsolute(p) && p.startsWith(WEBROOT + path.sep) ? path.relative(WEBROOT, p) : p);
+
+// onInfo gets { pid }, { tool: { name, target } } and { usage: {...} } as they happen.
+function askCli(messages, system, onText, signal, output, onInfo = () => {}) {
+  const access = READ_FILES
+    ? ['--tools', 'Read,Glob,Grep', '--permission-mode', 'dontAsk', '--settings', CLI_SETTINGS]
+    : ['--tools', ''];
   return new Promise((resolve, reject) => {
     const env = { ...process.env };
     // Keep the CLI on your Claude login (subscription) unless you opt in to API billing.
@@ -77,13 +116,15 @@ function askCli(messages, onText, signal) {
       '--output-format', 'stream-json',
       '--verbose',
       '--include-partial-messages',
-      '--system-prompt', SYSTEM_PROMPT,
-      '--tools', '',
+      '--system-prompt', READ_FILES ? system + filesPrompt(output?.conversation === false) : system,
+      ...access,
+      '--setting-sources', '',
       '--strict-mcp-config',
       '--no-session-persistence',
-    ], { cwd: cliWorkDir, env, stdio: ['pipe', 'pipe', 'pipe'] });
+    ], { cwd: READ_FILES ? WEBROOT : cliWorkDir, env, stdio: ['pipe', 'pipe', 'pipe'] });
+    onInfo({ pid: child.pid });
 
-    let streamed = false;
+    let streamed = false, newMessage = false;
     let finalText = '';
     let stderr = '';
     let buf = '';
@@ -103,16 +144,27 @@ function askCli(messages, onText, signal) {
         try { evt = JSON.parse(line); } catch { continue; }
         if (evt.type === 'stream_event') {
           const e = evt.event || {};
+          // Claude may speak, look at files, then speak again: each part is its own message, joined by a line break so
+          // the last sentence before the look and the first one after it don't run together.
+          if (e.type === 'message_start') newMessage = true;
           if (e.type === 'content_block_delta' && e.delta?.type === 'text_delta') {
+            if (newMessage && streamed) onText('\n');
+            newMessage = false;
             streamed = true;
             onText(e.delta.text);
           }
-        } else if (evt.type === 'assistant' && !streamed) {
-          // Older CLIs without partial messages: emit whole assistant text blocks.
-          for (const block of evt.message?.content || []) if (block.type === 'text') finalText += block.text;
+        } else if (evt.type === 'assistant') {
+          for (const block of evt.message?.content || []) {
+            if (block.type === 'tool_use') onInfo({ tool: { name: block.name, target: inWebroot(block.input?.file_path || block.input?.path || '') || block.input?.pattern || '' } });
+            // Older CLIs without partial messages: emit whole assistant text blocks.
+            else if (block.type === 'text' && !streamed) finalText += block.text;
+          }
         } else if (evt.type === 'result') {
           if (evt.is_error) stderr += String(evt.result || evt.subtype || 'CLI error');
           else if (!streamed && !finalText && typeof evt.result === 'string') finalText = evt.result;
+          const u = evt.usage || {};
+          onInfo({ usage: { input: u.input_tokens, cacheRead: u.cache_read_input_tokens, cacheWrite: u.cache_creation_input_tokens,
+            output: u.output_tokens, costUsd: evt.total_cost_usd, turns: evt.num_turns, ms: evt.duration_ms } });
         }
       }
     });
@@ -135,9 +187,9 @@ function askCli(messages, onText, signal) {
   });
 }
 
-function askApi(messages, onText, signal) {
+function askApi(messages, system, onText, signal, output, onInfo = () => {}) {
   if (!process.env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY is not set in .env');
-  return streamClaude({ apiKey: process.env.ANTHROPIC_API_KEY, model: MODEL, messages, signal, onText });
+  return streamClaude({ apiKey: process.env.ANTHROPIC_API_KEY, model: MODEL, system, messages, signal, onText, onUsage: (usage) => onInfo({ usage }) });
 }
 
 // ---------- HTTP ----------
@@ -174,7 +226,7 @@ const server = http.createServer(async (req, res) => {
   const origin = req.headers.origin;
   const url = new URL(req.url, 'http://x');
 
-  if (url.pathname === API_PATH || url.pathname === API_PATH + '/health') {
+  if (url.pathname === API_PATH || url.pathname === API_PATH + '/health' || url.pathname === API_PATH + '/status') {
     if (!originAllowed(origin)) { res.writeHead(403); return res.end('Origin not allowed'); }
     const cors = origin ? { 'access-control-allow-origin': origin, vary: 'Origin' } : {};
     if (req.method === 'OPTIONS') {
@@ -185,10 +237,16 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { ...cors, 'content-type': 'application/json' });
       return res.end(JSON.stringify({ ok: true, backend: BACKEND, model: MODEL }));
     }
+    // What's answering, what's running now (each until its process has exited) and how the last request went.
+    if (url.pathname.endsWith('/status')) {
+      res.writeHead(200, { ...cors, 'content-type': 'application/json', 'cache-control': 'no-store' });
+      const now = Date.now();
+      return res.end(JSON.stringify({ agent: AGENT, running: [...running.values()].map((r) => ({ ...r, seconds: Math.round((now - r.started) / 1000) })), last: lastRun }));
+    }
     if (req.method !== 'POST') { res.writeHead(405, cors); return res.end(); }
 
-    let messages;
-    try { messages = sanitizeMessages(JSON.parse(await readBody(req)).messages); } catch { messages = null; }
+    let messages, output;
+    try { ({ messages, output } = JSON.parse(await readBody(req))); messages = sanitizeMessages(messages); } catch { messages = null; }
     if (!messages) { res.writeHead(400, { ...cors, 'content-type': 'application/json' }); return res.end('{"error":"Bad request"}'); }
 
     res.writeHead(200, { ...cors, 'content-type': 'application/x-ndjson; charset=utf-8', 'cache-control': 'no-store', 'x-accel-buffering': 'no' });
@@ -196,12 +254,27 @@ const server = http.createServer(async (req, res) => {
     res.on('close', () => { if (!res.writableEnded) ac.abort(); });
     const send = (obj) => { if (!res.writableEnded) res.write(JSON.stringify(obj) + '\n'); };
     const started = Date.now();
+    const run = { id: ++runCount, started, pid: null, activity: 'thinking', tools: 0 };
+    let usage = null, outcome = 'done';
+    running.set(run.id, run);
+    send({ t: 'agent', v: AGENT });
+    const onInfo = (info) => {
+      if (info.pid) run.pid = info.pid;
+      if (info.tool) { run.tools++; run.activity = `${info.tool.name} ${info.tool.target}`.trim(); send({ t: 'tool', v: info.tool }); }
+      if (info.usage) { usage = info.usage; send({ t: 'usage', v: usage }); }
+    };
     try {
-      await (BACKEND === 'api' ? askApi : askCli)(messages, (text) => send({ t: 'text', v: text }), ac.signal);
+      await (BACKEND === 'api' ? askApi : askCli)(messages, systemPrompt(output), (text) => send({ t: 'text', v: text }), ac.signal, output, onInfo);
+      if (ac.signal.aborted) outcome = 'stopped';
       send({ t: 'done' });
-      log(`answered via ${BACKEND} in ${Date.now() - started} ms`);
+      log(`${outcome === 'stopped' ? 'stopped' : 'answered'} via ${BACKEND} in ${Date.now() - started} ms`);
     } catch (err) {
+      outcome = ac.signal.aborted ? 'stopped' : 'error';
       if (!ac.signal.aborted) { send({ t: 'error', v: err.message }); log(`error: ${err.message}`); }
+    } finally {
+      // Only now, once the CLI process has exited (askCli resolves on its exit), is the request no longer running.
+      running.delete(run.id);
+      lastRun = { id: run.id, outcome, ms: Date.now() - started, tools: run.tools, usage, ended: Date.now() };
     }
     return res.end();
   }
@@ -228,4 +301,5 @@ server.listen(PORT, HOST, () => {
   }
   if (SERVE_ROOT) log(`serving ${SERVE_ROOT} at http://localhost:${PORT}/`);
   if (BACKEND === 'cli') log(`CLI: ${CLI} (run "claude" once and log in if you have not)`);
+  if (BACKEND === 'cli') log(READ_FILES ? `CLI files: reads ${WEBROOT}, read-only (CLI_READ_FILES=false to turn off)` : 'CLI files: none');
 });

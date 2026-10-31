@@ -28,7 +28,15 @@
  *                      controls. Hovering over it shows Audio and Motion toggles above it, in one pill with it. While
  *                      Claude replies, a click on it pauses or resumes Claude's voice and motion; otherwise it does its own job.
  *   data-words         "false" to skip the keywords that float over the target while Claude speaks
- *   data-words-replace CSS selector of content to fade out while keywords show (default: the target's own content)
+ *   data-words-replace CSS selector of content to fade out while keywords show (default: the target's own content,
+ *                      except elements marked data-words-stay, such as a scene picture behind the words)
+ *   data-words-unless  CSS selector of displays that keep the floating words away: while one is visible as a reply starts,
+ *                      that reply shows no words and leaves the page's content as it is (localsite: the Earth map)
+ *   data-text-output   the ⚙ panel's Text Output choices that start on, separated by spaces or commas: conversation
+ *                      (captions of what you and Claude say), important (the key fact of each reply, in a line of its own),
+ *                      words (the keywords floating over the target) and sets (Claude marks word groups, such as
+ *                      "interest rates", so they float as one). Default: "conversation words sets". The panel overrides
+ *                      this and remembers the choices in this browser.
  *   data-autostart    "false" to wait for a click even when the mic is already allowed
  *   data-mic-level     "false" to skip the mic-level glow (if your device can't share the mic)
  *
@@ -495,15 +503,37 @@
     'honestly basically simply generally literally definitely certainly probably absolutely exactly pretty great good question'
   ).split(/\s+/));
 
-  /** The few words of a sentence most worth showing: longer words, names and numbers, not ones already shown. */
-  function keywordsOf(sentence, seen) {
+  // Precise word sets: Claude marks word groups that belong together [[like this]] (the "sets" rules in shared/voice-prompt.js).
+  // The marks are kept for the word field and taken out of what's spoken and shown as captions.
+  const unmark = (s) => s.replace(/\[\[|\]\]/g, '');
+  /** The marked word groups of a sentence, each with its position in the sentence once the marks are taken out. */
+  function wordSetsOf(marked) {
+    const sets = [], re = /\[\[([^\]]+?)\]\]/g;
+    let m, removed = 0;
+    while ((m = re.exec(marked))) {
+      const text = m[1].trim();
+      if (text) sets.push({ text, index: m.index - removed, end: m.index - removed + m[1].length });
+      removed += 4;
+    }
+    return sets;
+  }
+
+  /** The few words of a sentence most worth showing: marked word groups, then longer words, names and numbers, not ones already shown. */
+  function keywordsOf(marked, seen) {
     const found = [];
+    const sentence = unmark(marked), sets = wordSetsOf(marked);
+    sets.forEach((st) => {
+      const lower = st.text.toLowerCase().replace(/’/g, "'");
+      if (found.some((f) => f.lower === lower)) return;
+      found.push({ word: st.text, lower, index: st.index, score: 1.2 + Math.min(st.text.split(/\s+/).length, 4) * 0.1 - (seen.has(lower) ? 1 : 0) });
+    });
     const re = /\d[\d,.:]*%?|[A-Za-z][A-Za-z'’-]*/g;
     let m, first = true;
     while ((m = re.exec(sentence))) {
       const word = m[0].replace(/’/g, "'").replace(/[.,:]+$/, '').replace(/'s$/i, '').replace(/^-+|-+$/g, '');
       const lower = word.toLowerCase(), isFirst = first, isNum = /\d/.test(word);
       first = false;
+      if (sets.some((st) => m.index >= st.index && m.index < st.end)) continue; // already shown within its group
       if (!word || STOP_WORDS.has(lower) || (word.length < 3 && !isNum) || found.some((f) => f.lower === lower)) continue;
       let score = Math.min(word.length, 12) / 12;
       if (isNum) score += 0.8;
@@ -524,11 +554,12 @@
   }
 
   function WordField(host) {
-    if (ds.words === 'false') return { begin() {}, sentence() {}, summary() {}, finish() {}, clear() {}, setPaused() {} };
+    if (ds.words === 'false') return { begin() {}, sentence() {}, summary() {}, finish() {}, clear() {}, setPaused() {}, setEnabled() {}, off: true };
     const MAX_LIVE = 28;
     // Size steps as fractions of the target's span, from whisper to headline; each word lands on one at random, nudged up by its score.
     const SIZE_STEPS = [0.02, 0.032, 0.05, 0.078, 0.115, 0.16];
     const PAD = 18; // clear space kept around each word, a little more than its drift
+    const TOP = 90; // words and the statement stay this far below the target's top, clear of headers and controls there
     const layer = document.createElement('div');
     layer.className = 'claude-voice-words';
     layer.setAttribute('aria-hidden', 'true'); // the captions already carry the words for screen readers
@@ -549,17 +580,22 @@
       <div class="field"></div>`;
     const field = root.querySelector('.field');
     let live = [], stmt = null, seen = new Set(), summaryList = null, keyWords = new Set(), active = false, timers = [], pageTimer = null, still = false;
+    let enabled = true; // Large Words in the settings panel's Text Output
 
     // The target's own content (e.g. the demo's heading) steps aside while words are showing.
     const pageEls = () => (ds.wordsReplace ? [...document.querySelectorAll(ds.wordsReplace)]
       : host === document.body ? []
-      : [...host.children].filter((c) => c !== layer && c.tagName !== 'SCRIPT' && !/\bclaude-voice-/.test(c.getAttribute('class') || '')));
+      : [...host.children].filter((c) => c !== layer && c.tagName !== 'SCRIPT' && !c.hasAttribute('data-words-stay')
+        && !/\bclaude-voice-/.test(c.getAttribute('class') || '')));
     const showPage = (on) => pageEls().forEach((c) => { c.style.transition = 'opacity .6s ease'; c.style.opacity = on ? '' : '0'; });
     const span = () => Math.min(layer.clientWidth, layer.clientHeight * 1.6);
     // While motion is paused, words still come and go, but without moving: entrances and exits jump to their end, and the drift holds.
     const hold = (anims) => { if (still) anims.forEach((a) => (a.effect.getTiming().iterations === Infinity ? a.pause() : a.finish())); };
-    // How much a word matters: its keyword score, plus a lift once Claude's summary names it.
-    const weightOf = (o) => o.score + (keyWords.has(o.lower) ? 1.5 : 0);
+    // Another display (data-words-unless) is showing in the target, so the words stay away rather than hide it.
+    const otherDisplay = () => !!ds.wordsUnless && [...document.querySelectorAll(ds.wordsUnless)]
+      .some((d) => d.getClientRects().length > 0 && getComputedStyle(d).visibility !== 'hidden');
+    // How much a word (or word group) matters: its keyword score, plus a lift once Claude's summary names it.
+    const weightOf = (o) => o.score + (o.lower.split(/\s+/).some((w) => keyWords.has(w)) ? 1.5 : 0);
 
     function makeWord(text) {
       const el = document.createElement('div');
@@ -596,7 +632,7 @@
     function findSpot(w, h, spots) {
       let best = null;
       for (const s of spots) {
-        const box = { x: Math.max(0, s.x), y: Math.max(0, s.y), w, h };
+        const box = { x: Math.max(0, s.x), y: Math.max(TOP, s.y), w, h };
         if (stmt && stmt.box && overlap(box, stmt.box)) continue;
         const under = live.filter((o) => overlap(box, o.box));
         const cost = under.reduce((a, o) => a + 1 + weightOf(o), 0);
@@ -607,7 +643,7 @@
     }
     const scatter = (w, h, n) => {
       const W = layer.clientWidth, H = layer.clientHeight;
-      return Array.from({ length: n }, () => ({ x: (W - w) * rand(0.03, 0.97), y: (H - h) * rand(0.06, 0.8) }));
+      return Array.from({ length: n }, () => ({ x: (W - w) * rand(0.03, 0.97), y: TOP + Math.max(0, H - h - TOP) * rand(0, 0.78) }));
     };
     function show(k) {
       if (!active) return;
@@ -623,6 +659,9 @@
       for (let shrunk = 0; ; shrunk++) {
         el.style.fontSize = clamp(span() * SIZE_STEPS[step] * jitter, 13, 200) + 'px';
         el.style.fontWeight = step >= 4 ? 750 : step <= 1 ? 450 : 620;
+        // A long word group at a large size could be wider than the target: it shrinks to fit.
+        const room = layer.clientWidth * 0.9;
+        if (el.offsetWidth > room) el.style.fontSize = Math.max(13, parseFloat(el.style.fontSize) * room / el.offsetWidth) + 'px';
         spot = findSpot(el.offsetWidth, el.offsetHeight, scatter(el.offsetWidth, el.offsetHeight, 60));
         if (!spot || !spot.cost || shrunk || !step) break;
         step--;
@@ -657,7 +696,7 @@
       if (el.offsetWidth > W * 0.9) el.style.maxWidth = W * 0.6 + 'px'; // a long summary wraps into a narrower block
       else el.style.whiteSpace = 'nowrap';
       const w = el.offsetWidth, h = el.offsetHeight;
-      const corners = [{ kind: 'tl', x: W * 0.05, y: H * 0.07 }, { kind: 'tr', x: W * 0.95 - w, y: H * 0.07 }, { kind: 'bl', x: W * 0.05, y: H * 0.91 - h }]
+      const corners = [{ kind: 'tl', x: W * 0.05, y: TOP }, { kind: 'tr', x: W * 0.95 - w, y: TOP }, { kind: 'bl', x: W * 0.05, y: H * 0.91 - h }]
         .sort(() => Math.random() - 0.5);
       const amid = Array.from({ length: 40 }, () => ({ kind: 'amid', x: (W - w) * rand(0.2, 0.8), y: (H - h) * rand(0.2, 0.7) }));
       // The statement always shows: of the spots, the clearest wins (amid or a corner first, at random) and any words under it make way.
@@ -684,13 +723,14 @@
         live.forEach((o, i) => fadeOut(o.el, i * 30));
         if (stmt) fadeOut(stmt.el);
         live = []; stmt = null;
-        seen = new Set(); summaryList = null; keyWords = new Set(); active = true;
-        clearTimeout(pageTimer); showPage(false);
+        seen = new Set(); summaryList = null; keyWords = new Set(); active = enabled && !otherDisplay();
+        if (active) { clearTimeout(pageTimer); showPage(false); }
       },
-      /** Show a sentence's keywords as they are spoken: on the engine's word boundaries, or on estimated timing when it sends none. */
-      sentence(text, u) {
+      /** Show a sentence's keywords as they are spoken: on the engine's word boundaries, or on estimated timing when it sends none.
+          The sentence may hold marked word groups ([[like this]]); positions are in the spoken text, without the marks. */
+      sentence(marked, u) {
         if (!active) return;
-        const ks = keywordsOf(text, seen);
+        const ks = keywordsOf(marked, seen), text = unmark(marked);
         if (!ks.length) return;
         const shown = new Set();
         const showOnce = (k) => { if (!shown.has(k)) { shown.add(k); show(k); } };
@@ -717,6 +757,11 @@
         else if (!live.length) clear();
       },
       clear,
+      /** Large Words off: the words and statement go, and the next replies show none. */
+      setEnabled(on) {
+        enabled = !!on;
+        if (!enabled && (live.length || stmt || active)) clear();
+      },
       /** Motion paused: every word holds where it is. Resumed: they carry on. */
       setPaused(p) {
         still = !!p;
@@ -730,8 +775,8 @@
 
   // ------------------------------------------------------------------ UI (shadow DOM so page CSS never collides)
   function UI(host, actions) {
-    if (cfg.ui === 'none') return { setState() {}, user() {}, claude() {}, note() {}, fade() {}, showInput() {}, setVoices() {}, setVoiceMode() {}, setVoiceInfo() {}, setPaused() {}, play: null };
-    const play = ds.playButton ? document.querySelector(ds.playButton) : null;
+    if (cfg.ui === 'none') return { setState() {}, user() {}, claude() {}, important() {}, note() {}, fade() {}, showInput() {}, setVoices() {}, setVoiceMode() {}, setVoiceInfo() {}, setTextOutput() {}, setPaused() {}, setAgent() {}, play: null };
+    let play = ds.playButton ? document.querySelector(ds.playButton) : null;
     const el = document.createElement('div');
     el.className = 'claude-voice-ui';
     // At the side, the controls go in <body> so they show even where the target is covered or hidden.
@@ -748,6 +793,12 @@
                border: 1px solid rgba(255,255,255,.12); transition: opacity .6s ease; max-height: 30vh; overflow: auto; }
         .cap:empty { display: none; }
         .user { font-style: italic; opacity: .85; font-size: 14px; }
+        .important { font-size: 16px; font-weight: 600; }
+        .important::before { content: "Important"; display: block; margin-bottom: 3px; font-size: 11px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; opacity: .6; }
+        /* Text Output choices that are off. Hidden captions still update, and Claude keeps listening; notes (errors and status) still show. */
+        .no-conversation .user, .no-conversation .claude, .no-important .important { display: none; }
+        /* While the settings panel is open, it takes the captions' place. */
+        .settings-open .cap { display: none; }
         .row { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; align-items: center; }
         .panel { display: none; flex-direction: column; gap: 10px; width: min(300px, 100%); padding: 12px 14px; border-radius: 14px; color: #f4f6fb;
                  font-size: 13px; background: rgba(10,12,20,.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
@@ -756,6 +807,29 @@
         .panel label { display: flex; flex-direction: column; gap: 5px; }
         .panel [hidden] { display: none; }
         .hint { font-size: 12px; line-height: 1.4; opacity: .75; }
+        .text-out, .agent { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.14); }
+        .text-out .head, .agent .head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
+        /* "Details" shows each choice's description under its one-line label. .btn-sm as in localsite's base.css, which can't reach in here. */
+        .panel .btn-sm { display: inline-flex; padding: .2rem .55rem; font-size: .75rem; font-weight: 400; line-height: 1.2; border-radius: 2rem;
+                         border: 1px solid rgba(255,255,255,.3); background: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+        .panel .btn-sm:hover { background: rgba(255,255,255,.1); }
+        .panel .btn-sm[aria-expanded="true"] { color: #8a93a8; }
+        .panel a.btn-sm { color: #f4f6fb; text-decoration: none; }
+        /* Agent: what answers, what it's doing now (from the bridge or Worker) and what the last reply used. */
+        .agent { gap: 4px; }
+        .agent .head { margin-bottom: 2px; }
+        .agent .hint:empty { display: none; }
+        /* "Details" at the end of the usage line shows how the agent reaches files (or which key it uses) on that line. */
+        .panel button.link { display: inline; padding: 0; border: 0; border-radius: 0; background: none; backdrop-filter: none; -webkit-backdrop-filter: none;
+                             font-size: inherit; color: #9cc2e8; text-decoration: underline; text-underline-offset: 2px; }
+        .panel button.link[aria-expanded="true"] { color: #8a93a8; }
+        .panel button.link[hidden] { display: none; }
+        .agent-status { opacity: .9; }
+        .panel label.check { flex-direction: row; align-items: flex-start; gap: 8px; cursor: pointer; }
+        .check input { flex: none; width: 16px; height: 16px; margin: 1px 0 0; accent-color: #9cc2e8; cursor: pointer; }
+        .check small { display: none; margin-top: 2px; font-size: 12px; line-height: 1.35; opacity: .7; }
+        .text-out.open .check small { display: block; }
+        .check:has(input:disabled) { opacity: .45; cursor: default; }
         /* Same height as the row's buttons; the custom arrow sits in the extra right padding. */
         select { appearance: none; -webkit-appearance: none; width: 100%; height: 38px; margin: 0; padding: 0 32px 0 14px; border-radius: 999px;
                  color: #f4f6fb; font-size: 14px; line-height: normal; cursor: pointer; outline: none; text-overflow: ellipsis;
@@ -782,10 +856,10 @@
         .kb svg { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
         form { display: none; width: min(440px, 100%); }
         form.on { display: flex; gap: 6px; }
-        input { flex: 1; min-width: 0; padding: 9px 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,.2);
+        input[type="text"] { flex: 1; min-width: 0; padding: 9px 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,.2);
                 background: rgba(10,12,20,.55); color: #fff; font-size: 14px; outline: none; }
         .minimal .cap { display: none; }
-        /* The page's play button (data-play-button) at the row's right end, in a pill that grows upward over the
+        /* The page's play button (data-play-button), or this widget's own when the page has none, at the row's right end, in a pill that grows upward over the
            captions on hover, showing the Audio and Motion toggles above it. A paused toggle turns grey. */
         .ctl { position: relative; width: 38px; height: 38px; flex: none; }
         .ctl-pill { position: absolute; left: 0; bottom: 0; width: 38px; display: flex; flex-direction: column; border-radius: 19px; overflow: hidden;
@@ -796,13 +870,16 @@
         .ctl-pill .kb:hover, ::slotted([slot="play"]:hover) { background: rgba(255,255,255,.12); }
         .ctl-pill .kb:focus-visible { outline-offset: -2px; }
         .ctl-pill .kb[aria-pressed="true"] { color: #7d8597; }
+        .ctl-pill .playPauseButton[aria-pressed="true"] { color: #f4f6fb; }
         ::slotted([slot="play"]) { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 50%;
                                    color: #f4f6fb; cursor: pointer; outline: none; }
         ::slotted([slot="play"]:focus-visible) { outline: 2px solid #fff; outline-offset: -2px; }
       </style>
       <div class="wrap ${cfg.ui === 'minimal' ? 'minimal' : ''}" data-s="off">
+        <div class="cap important" aria-live="polite"></div>
         <div class="cap user" aria-live="polite"></div>
         <div class="cap claude" aria-live="polite"></div>
+        <div class="cap notice" role="status"></div>
         <form><input type="text" placeholder="Type to Claude…" aria-label="Message Claude"><button type="submit">Send</button></form>
         <div class="panel" id="cv-settings" role="group" aria-label="Voice settings">
           <label>Voice
@@ -814,6 +891,19 @@
           </label>
           <label class="pick">Chosen voice<select class="voice"></select></label>
           <div class="hint"></div>
+          <div class="text-out" role="group" aria-labelledby="cv-text-out">
+            <div class="head"><span id="cv-text-out">Text Output</span><button class="details btn-sm" type="button" aria-expanded="false">Details</button></div>
+            <label class="check"><input type="checkbox" name="conversation"><span>Conversation Text<small>Captions of what you and Claude say. Claude still listens while they're hidden.</small></span></label>
+            <label class="check"><input type="checkbox" name="important"><span>Important Text<small>The key fact of each reply, in fewer words than the conversation.</small></span></label>
+            <label class="check"><input type="checkbox" name="words"><span>Large Words<small>Keywords float over the page, large and small, as Claude speaks.</small></span></label>
+            <label class="check"><input type="checkbox" name="sets"><span>Precise Word Sets<small>Claude marks words that belong together, such as "interest rates", so they show as one.</small></span></label>
+          </div>
+          <div class="agent" role="group" aria-labelledby="cv-agent">
+            <div class="head"><span id="cv-agent">Agent</span><a class="btn-sm" href="/keys/" target="agents">Keys</a></div>
+            <div class="agent-name"></div>
+            <div class="agent-status hint" aria-live="polite"></div>
+            <div class="hint"><span class="agent-usage"></span> <button class="link agent-more" type="button" aria-expanded="false">Details</button><span class="agent-via" hidden></span></div>
+          </div>
         </div>
         <div class="row">
           <button class="kb gear" type="button" title="Voice settings" aria-label="Voice settings" aria-expanded="false" aria-controls="cv-settings">
@@ -823,7 +913,7 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 12.5h.01M10 12.5h.01M14 12.5h.01M18 12.5h.01M7 16h10"/></svg>
           </button>
           <button class="pill" type="button"><span class="dot"></span><span class="label">Enable voice</span></button>
-          ${play ? `<div class="ctl"><div class="ctl-pill">
+          <div class="ctl"><div class="ctl-pill">
             <div class="more">
               <button class="kb audio" type="button" title="Pause Claude's voice" aria-label="Pause Claude's voice" aria-pressed="false">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>
@@ -832,19 +922,40 @@
                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="15.5" cy="12" r="5.5"/><path d="M2 8.5h5M3.5 12H7M2 15.5h5"/></svg>
               </button>
             </div>
-            <slot name="play"></slot>
-          </div></div>` : ''}
+            <slot name="play"><button class="kb playPauseButton" type="button" title="Pause Claude" aria-label="Pause Claude" aria-pressed="false">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6v12M15 6v12"/></svg>
+            </button></slot>
+          </div></div>
         </div>
       </div>`;
     host.appendChild(el);
-    if (play) { play.slot = 'play'; el.appendChild(play); } // Stays in the page's DOM, so its own scripts still find and run it
+    // The page's play button stays in the page's DOM, so its own scripts still find and run it. Until it's slotted
+    // (some pages add it only once their map loads, others never do), the widget's own .playPauseButton fills the slot,
+    // so the Audio and Motion buttons above it can always be reached.
+    const adopt = (b) => { play = b; b.slot = 'play'; el.appendChild(b); actions.playAdopted(); };
+    if (play) { play.slot = 'play'; el.appendChild(play); }
+    else if (ds.playButton) {
+      const watch = new MutationObserver(() => { const b = document.querySelector(ds.playButton); if (b && !el.contains(b)) { watch.disconnect(); adopt(b); } });
+      watch.observe(document.documentElement, { childList: true, subtree: true });
+    }
     const $ = (s) => root.querySelector(s);
-    const wrap = $('.wrap'), label = $('.label'), userCap = $('.user'), claudeCap = $('.claude'), form = $('form'), input = $('input');
+    const wrap = $('.wrap'), label = $('.label'), userCap = $('.user'), claudeCap = $('.claude'), importantCap = $('.important'), noticeCap = $('.notice'), form = $('form'), input = $('form input');
     $('.pill').addEventListener('click', actions.pill);
     $('.type').addEventListener('click', () => { form.classList.toggle('on'); if (form.classList.contains('on')) input.focus(); });
-    form.addEventListener('submit', (e) => { e.preventDefault(); const v = input.value.trim(); if (v) { input.value = ''; actions.typed(v); } });
     const panel = $('.panel'), gear = $('.gear'), modeSel = $('.vmode'), pick = $('.pick'), voiceSel = $('.voice'), hint = $('.hint');
-    const showPanel = (on) => { panel.classList.toggle('on', on); gear.setAttribute('aria-expanded', String(on)); };
+    const showPanel = (on) => {
+      panel.classList.toggle('on', on); wrap.classList.toggle('settings-open', on); gear.setAttribute('aria-expanded', String(on));
+      if (on) actions.panelOpened();
+    };
+    form.addEventListener('submit', (e) => { e.preventDefault(); showPanel(false); const v = input.value.trim(); if (v) { input.value = ''; actions.typed(v); } });
+    // A click anywhere off the panel (and off its ⚙ button, which toggles it) closes it, Send included.
+    // Captured on window, so the page's own handlers can't stop it. On click rather than pointerdown: the typing box sits
+    // above the panel, so closing the panel on press would move Send out from under the pointer before the click lands.
+    window.addEventListener('click', (e) => {
+      if (!panel.classList.contains('on')) return;
+      const path = e.composedPath();
+      if (!path.includes(panel) && !path.includes(gear)) showPanel(false);
+    }, true);
     gear.addEventListener('click', () => { showPanel(!panel.classList.contains('on')); if (panel.classList.contains('on')) modeSel.focus(); });
     root.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape' || !panel.classList.contains('on')) return;
@@ -852,18 +963,26 @@
     });
     modeSel.addEventListener('change', () => { pick.hidden = modeSel.value !== 'chosen'; actions.voiceMode(modeSel.value); });
     voiceSel.addEventListener('change', () => actions.voice(voiceSel.value));
-    const audioBtn = $('.audio'), motionBtn = $('.motion');
-    if (audioBtn) audioBtn.addEventListener('click', actions.audio);
-    if (motionBtn) motionBtn.addEventListener('click', actions.motion);
+    const textOutBox = $('.text-out'), detailsBtn = $('.text-out .details');
+    detailsBtn.addEventListener('click', () => detailsBtn.setAttribute('aria-expanded', String(textOutBox.classList.toggle('open'))));
+    const checks = [...root.querySelectorAll('.text-out input')];
+    checks.forEach((c) => c.addEventListener('change', () => actions.textOutput(c.name, c.checked)));
+    const audioBtn = $('.audio'), motionBtn = $('.motion'), ownPlay = $('.playPauseButton');
+    audioBtn.addEventListener('click', actions.audio);
+    motionBtn.addEventListener('click', actions.motion);
+    ownPlay.addEventListener('click', actions.hold);
+    const agentName = $('.agent-name'), agentVia = $('.agent-via'), agentStatus = $('.agent-status'), agentUsage = $('.agent-usage'), agentMore = $('.agent-more');
+    agentMore.addEventListener('click', () => { agentVia.hidden = !agentVia.hidden; agentMore.setAttribute('aria-expanded', String(!agentVia.hidden)); });
     // data-open on the controls while anything shows above their row, for the page's own CSS (see the header)
     const ctl = $('.ctl');
     let ctlOpen = false;
+    const showing = (c) => !!c.textContent && c.style.opacity !== '0' && c.getClientRects().length > 0; // not hidden by a Text Output choice
     const syncOpen = () => el.toggleAttribute('data-open', ctlOpen || panel.classList.contains('on') || form.classList.contains('on')
-      || !!userCap.textContent || (!!claudeCap.textContent && claudeCap.style.opacity !== '0'));
+      || [userCap, claudeCap, importantCap, noticeCap].some(showing));
     new MutationObserver(syncOpen).observe(root, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'style'] });
-    if (ctl) {
+    {
       let hover = false, focus = false;
-      const inside = (n) => !!n && (ctl.contains(n) || play.contains(n)); // The play button is slotted, so it's in the page's DOM
+      const inside = (n) => !!n && (ctl.contains(n) || (play && play.contains(n))); // The page's play button is slotted, so it's in the page's DOM
       const set = () => { ctlOpen = hover || focus; syncOpen(); };
       ctl.addEventListener('pointerenter', () => { hover = true; set(); });
       ctl.addEventListener('pointerleave', () => { hover = false; set(); });
@@ -874,12 +993,17 @@
       const t = `${paused ? 'Resume' : 'Pause'} Claude's ${what}`;
       btn.setAttribute('aria-pressed', String(paused)); btn.title = t; btn.setAttribute('aria-label', t);
     };
-    let fadeTimer;
+    let fadeTimer, noteTimer;
     return {
       setState(s, text) { wrap.dataset.s = s; label.textContent = text; },
       user(t) { userCap.textContent = t ? `“${t}”` : ''; },
       claude(t) { claudeCap.textContent = t; claudeCap.style.opacity = 1; clearTimeout(fadeTimer); },
-      note(t, ms = 6000) { claudeCap.textContent = t; claudeCap.style.opacity = 1; clearTimeout(fadeTimer); fadeTimer = setTimeout(() => { claudeCap.style.opacity = 0; }, ms); },
+      important(t) { importantCap.textContent = t; },
+      /** Status and errors, in a box of their own so a reply streaming into the captions can't overwrite them. */
+      note(t, ms = 6000) {
+        noticeCap.textContent = t; noticeCap.style.opacity = 1; clearTimeout(noteTimer);
+        noteTimer = setTimeout(() => { noticeCap.style.opacity = 0; noteTimer = setTimeout(() => { noticeCap.textContent = ''; }, 600); }, ms);
+      },
       fade(ms = 8000) { clearTimeout(fadeTimer); fadeTimer = setTimeout(() => { claudeCap.style.opacity = 0; userCap.textContent = ''; }, ms); },
       showInput() { form.classList.add('on'); },
       setVoices(list, selected) {
@@ -896,8 +1020,28 @@
       },
       setVoiceMode(m) { modeSel.value = m; pick.hidden = m !== 'chosen'; },
       setVoiceInfo(m, name) { hint.textContent = VOICE_HINTS[m] + (name && m !== 'chosen' ? ` Now: ${name}.` : ''); },
-      setPaused(audio, motion) { if (audioBtn) { toggleLabel(audioBtn, audio, 'voice'); toggleLabel(motionBtn, motion, 'motion'); } },
-      play,
+      /** Text Output: { conversation, important, words, sets } as booleans. noWords: the page turned the floating words off (data-words). */
+      setTextOutput(o, noWords) {
+        checks.forEach((c) => {
+          c.checked = !!o[c.name];
+          if (c.name === 'words' || c.name === 'sets') c.closest('label').hidden = noWords;
+        });
+        root.querySelector('[name="sets"]').disabled = !o.words; // word groups only show as Large Words
+        wrap.classList.toggle('no-conversation', !o.conversation);
+        wrap.classList.toggle('no-important', !o.important);
+      },
+      setPaused(audio, motion) {
+        toggleLabel(audioBtn, audio, 'voice'); toggleLabel(motionBtn, motion, 'motion');
+        const held = audio || motion, t = held ? 'Resume Claude' : 'Pause Claude';
+        ownPlay.setAttribute('aria-pressed', String(held)); ownPlay.title = t; ownPlay.setAttribute('aria-label', t);
+        ownPlay.querySelector('path').setAttribute('d', held ? 'M8 5.5v13l10.5-6.5z' : 'M9 6v12M15 6v12');
+      },
+      /** The settings panel's Agent section, a line each: which agent, how it answers, what it's doing, what it used. */
+      setAgent(name, via, status, usage) {
+        agentName.textContent = name; agentStatus.textContent = status; agentUsage.textContent = usage;
+        agentVia.textContent = ` ${via}`; agentMore.hidden = !via;
+      },
+      get play() { return play; },
     };
   }
 
@@ -937,6 +1081,7 @@
   let history = [], pending = '', sendTimer = null, idleTimer = null, abortCtl = null, queuedTurn = '';
   let speakQueue = [], speaking = null, streamDone = true, ttsUnlocked = false, voice = null, currentSentence = '';
   let audioPaused = false, motionPaused = false;
+  let voiceBlockNoted = false; // a "voice was blocked" note shows once, until speech works again
 
   const ui = UI(host, {
     pill() {
@@ -964,6 +1109,14 @@
     },
     audio() { setAudioPaused(!audioPaused); },
     motion() { setMotionPaused(!motionPaused); },
+    hold() { const p = !(audioPaused || motionPaused); setAudioPaused(p); setMotionPaused(p); }, // the widget's own play button
+    playAdopted() { syncPlayButton(); },
+    panelOpened() { checkAgent(); },
+    textOutput(name, on) {
+      textOut[name] = on;
+      store(TEXT_KEY, JSON.stringify(textOut));
+      applyTextOutput();
+    },
   });
 
   function setMode(m) {
@@ -1005,9 +1158,9 @@
       if (pagePlay.label === null) btn.removeAttribute('aria-label'); else btn.setAttribute('aria-label', pagePlay.label);
     }
   }
-  if (ui.play) {
+  {
     const onPlay = (e) => {
-      if (!replying() || !ui.play.contains(e.target)) return;
+      if (!replying() || !ui.play || !ui.play.contains(e.target)) return;
       if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
       e.preventDefault(); e.stopImmediatePropagation();
       const p = !(audioPaused || motionPaused);
@@ -1054,6 +1207,23 @@
   } catch (e) { /* storage blocked */ }
   function store(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* storage blocked */ } }
   ui.setVoiceMode(voiceMode);
+
+  // Text Output, also in the settings panel: which kinds of text show (data-text-output, then this browser's choices).
+  // Important Text and Precise Word Sets each add rules to Claude's prompt (shared/voice-prompt.js), so they're asked for only when on.
+  const TEXT_KEY = 'claude-voice:text-output', TEXT_KINDS = ['conversation', 'important', 'words', 'sets'];
+  const textOut = (() => {
+    const on = ds.textOutput === undefined ? ['conversation', 'words', 'sets'] : ds.textOutput.toLowerCase().split(/[\s,]+/);
+    return Object.fromEntries(TEXT_KINDS.map((k) => [k, on.includes(k)]));
+  })();
+  try {
+    const saved = JSON.parse(localStorage.getItem(TEXT_KEY) || 'null');
+    if (saved) TEXT_KINDS.forEach((k) => { if (typeof saved[k] === 'boolean') textOut[k] = saved[k]; });
+  } catch (e) { /* storage blocked or unreadable */ }
+  function applyTextOutput() {
+    ui.setTextOutput(textOut, !!wordField.off);
+    wordField.setEnabled(textOut.words);
+  }
+  applyTextOutput();
 
   function englishVoices() { return tts ? rankVoices(tts.getVoices().filter((v) => /^en/i.test(v.lang || ''))) : []; }
 
@@ -1250,14 +1420,14 @@
     const ctl = abortCtl;
     let raw = '', spokenText = '', moodDone = false, sentenceBuf = '';
     streamDone = false;
-    ui.claude('');
+    ui.claude(''); ui.important('');
     wordField.begin();
     // "Change for response": pick this reply's voice once the mood header is in, before the first sentence is spoken.
     const voiceForReply = (style) => { if (voiceMode === 'response') rollVoice(style); };
 
     const feedSpeech = (chunk) => {
       spokenText += chunk;
-      ui.claude(forSpeech(spokenText));
+      ui.claude(unmark(forSpeech(spokenText)).replace(/\[$/, '')); // a mark may be half arrived
       sentenceBuf += chunk;
       let m;
       // speak each complete sentence as soon as it arrives
@@ -1267,15 +1437,21 @@
         if (s) enqueueSpeech(s, null, true);
       }
     };
-    // The reply ends with <summary>[...]</summary>, which goes to the word field instead of being spoken.
-    // A possible start of that tag at the end of a chunk waits for the next chunk.
-    let summaryRaw = null, held = '';
+    // The reply ends with <important>...</important> (when Important Text is on) and <summary>[...]</summary>, which go
+    // to the screen instead of being spoken. A possible start of either tag at the end of a chunk waits for the next chunk.
+    const TAGS = ['<important>', '<summary>'];
+    let tailRaw = null, held = '', importantShown = false;
+    const showImportant = (last) => {
+      if (importantShown || tailRaw === null) return;
+      const m = tailRaw.match(last ? /<important>([\s\S]*?)(?:<\/important>|<summary>|$)/ : /<important>([\s\S]*?)<\/important>/);
+      if (m && m[1].trim()) { importantShown = true; ui.important(unmark(m[1]).trim()); }
+    };
     const feedBody = (chunk) => {
-      if (summaryRaw !== null) { summaryRaw += chunk; return; }
+      if (tailRaw !== null) { tailRaw += chunk; return showImportant(); }
       let s = held + chunk; held = '';
-      const at = s.indexOf('<summary>');
-      if (at >= 0) { summaryRaw = s.slice(at + 9); s = s.slice(0, at); }
-      else { const lt = s.lastIndexOf('<'); if (lt >= 0 && '<summary>'.startsWith(s.slice(lt))) { held = s.slice(lt); s = s.slice(0, lt); } }
+      const at = Math.min(...TAGS.map((t) => { const i = s.indexOf(t); return i < 0 ? Infinity : i; }));
+      if (at < Infinity) { tailRaw = s.slice(at); s = s.slice(0, at); showImportant(); }
+      else { const lt = s.lastIndexOf('<'); if (lt >= 0 && TAGS.some((t) => t.startsWith(s.slice(lt)))) { held = s.slice(lt); s = s.slice(0, lt); } }
       if (s) feedSpeech(s);
     };
     const take = (chunk) => {
@@ -1299,11 +1475,12 @@
       } else if (head.length > 600) { moodDone = true; voiceForReply(); feedBody(head); }
     };
 
+    const thisRun = startRun();
     try {
       const res = await fetch(cfg.endpoint, {
         method: 'POST', signal: ctl.signal,
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ messages: history }),
+        body: JSON.stringify({ messages: history, output: { conversation: textOut.conversation, important: textOut.important, sets: textOut.words && textOut.sets && !wordField.off } }),
       });
       if (!res.ok || !res.body) throw new Error(`Endpoint replied ${res.status}`);
       const reader = res.body.getReader(), dec = new TextDecoder();
@@ -1319,21 +1496,28 @@
           let evt; try { evt = JSON.parse(line); } catch { continue; }
           if (evt.t === 'text') take(evt.v);
           else if (evt.t === 'error') throw new Error(evt.v);
+          else if (evt.t === 'agent') { agent = evt.v; showAgent(); }
+          else if (evt.t === 'tool') { thisRun.tools++; thisRun.activity = `${evt.v.name} ${evt.v.target || ''}`.trim(); showAgent(); }
+          else if (evt.t === 'usage') { thisRun.usage = evt.v; showAgent(); }
         }
       }
       if (!moodDone && raw) { moodDone = true; voiceForReply(); feedBody(raw.trimStart()); }
       if (held) { feedSpeech(held); held = ''; }
-      wordField.summary(parseSummary(summaryRaw));
+      showImportant(true);
+      const sum = tailRaw && tailRaw.match(/<summary>([\s\S]*)/);
+      wordField.summary(parseSummary(sum && sum[1]));
       const tail = forSpeech(sentenceBuf); sentenceBuf = '';
       if (tail) enqueueSpeech(tail, null, true);
       if (raw.trim()) history.push({ role: 'assistant', content: raw.trim() });
-      emit('reply', { text: forSpeech(spokenText) });
+      emit('reply', { text: unmark(forSpeech(spokenText)) });
+      endRun(thisRun, 'done');
     } catch (err) {
       if (ctl.signal.aborted) return;
       console.warn('[claude-voice]', err);
       const msg = /Failed to fetch|NetworkError|Load failed/i.test(err.message)
         ? (isLocal ? 'I can’t reach the local bridge. Start it with: node engine/server/local-bridge.mjs' : 'I can’t reach the server right now.')
         : err.message;
+      endRun(thisRun, 'error', msg);
       history.pop();
       ui.note(msg, 12000);
       enqueueSpeech('Sorry, I couldn’t reach Claude just then.');
@@ -1344,6 +1528,77 @@
     }
   }
 
+  // --- the settings panel's Agent section: which agent answers (sent with each reply, and by the local bridge's
+  // .../status), what it's doing while it answers, and what the last reply used. After Stop, it asks the bridge
+  // whether any Claude process is still running, so a reply that kept going in the background would show.
+  const STATUS_URL = cfg.endpoint.replace(/\/?$/, '/status');
+  let agent = null, run = null, server = null, agentTick = null;
+  const secs = (ms) => (ms < 10000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms / 1000)}s`);
+  const num = (n) => Number(n || 0).toLocaleString();
+  const looks = (n) => (n ? `${n} file look${n === 1 ? '' : 's'}` : '');
+  function usageText(u, tools) {
+    if (!u) return looks(tools);
+    const cached = (u.cacheRead || 0) + (u.cacheWrite || 0);
+    return [`${num((u.input || 0) + cached)} tokens in${u.cacheRead ? ` (${num(u.cacheRead)} cached)` : ''}`, `${num(u.output)} out`,
+      typeof u.costUsd === 'number' && `$${u.costUsd.toFixed(4)}`, u.turns > 1 && `${u.turns} turns`, looks(tools)].filter(Boolean).join(' · ');
+  }
+  function showAgent() {
+    const name = agent ? [agent.name, agent.model].filter(Boolean).join(' · ') : 'Not known until Claude first answers';
+    const via = agent ? agent.files || (agent.detail && `Uses ${agent.detail}`) : '';
+    const others = server && server.running && !(run && run.state === 'running') ? server.running : [];
+    let status = '', usage = '';
+    if (run) {
+      status = run.state === 'running' ? `Running ${secs(Date.now() - run.started)}${run.activity ? ` · ${run.activity}` : ''}`
+        : run.state === 'stopping' ? 'Stopping…'
+        : run.state === 'stopped' ? (server ? (others.length ? '' : 'Stopped. No Claude process is running.') : 'Stopped. The reply was cancelled.')
+        : run.state === 'error' ? `Error: ${run.error}`
+        : `Finished in ${secs(run.ms)}`;
+      usage = usageText(run.usage, run.tools);
+    } else if (server && server.last) {
+      status = `Last request ${server.last.outcome === 'done' ? 'finished' : server.last.outcome} in ${secs(server.last.ms)}`;
+      usage = usageText(server.last.usage, server.last.tools);
+    } else status = 'Idle';
+    if (others.length) status = `Still running: ${others.map((r) => `${r.pid ? `process ${r.pid}, ` : ''}${r.seconds}s, ${r.activity}`).join('; ')}`;
+    ui.setAgent(name, via, status, usage);
+  }
+  function startRun() {
+    run = { started: Date.now(), state: 'running', activity: '', tools: 0, usage: null };
+    server = null;
+    clearInterval(agentTick); agentTick = setInterval(showAgent, 1000);
+    showAgent();
+    return run;
+  }
+  function endRun(r, state, error) {
+    if (r !== run || r.state !== 'running') return;
+    Object.assign(r, { state, error, ms: Date.now() - r.started });
+    clearInterval(agentTick);
+    showAgent();
+  }
+  function stoppingRun() {
+    if (!run || run.state !== 'running') return;
+    Object.assign(run, { state: 'stopping', ms: Date.now() - run.started });
+    clearInterval(agentTick);
+    showAgent();
+    // Asks again, a few times, while the bridge still lists a process (it ends the CLI on Stop, which can take a moment).
+    const r = run;
+    const check = (tries) => checkAgent().then(() => {
+      if (run === r && r.state === 'stopping') { r.state = 'stopped'; showAgent(); }
+      if (tries > 1 && server && server.running && server.running.length) setTimeout(() => check(tries - 1), 2000);
+    });
+    setTimeout(() => check(5), 1500);
+  }
+  // The bridge's view, which includes replies from other tabs. The Worker has none, which leaves the status as this page saw it.
+  async function checkAgent() {
+    try {
+      const res = await fetch(STATUS_URL, { cache: 'no-store' });
+      if (!res.ok) throw new Error(String(res.status));
+      server = await res.json();
+      if (server.agent) agent = server.agent;
+    } catch (e) { server = null; }
+    showAgent();
+  }
+  showAgent();
+
   // --- text to speech (own queue so we can pulse visuals, interrupt, and recover from stuck engines)
   function enqueueSpeech(text, onDone, showWords) {
     speakQueue.push({ text, onDone, showWords });
@@ -1353,27 +1608,37 @@
     const item = speakQueue.shift();
     if (!item) { speaking = null; currentSentence = ''; if (streamDone) afterSpeech(); return; }
     if (mode !== 'speaking') setMode('speaking');
-    currentSentence = item.text;
+    const spoken = unmark(item.text); // item.text may hold marked word groups, for the word field
+    currentSentence = spoken;
     let finished = false;
     const finish = () => {
       if (finished) return; finished = true; clearTimeout(watchdog);
       if (item.onDone) { speaking = null; currentSentence = ''; return item.onDone(); }
       speakNext();
     };
-    const words = item.text.split(/\s+/).length;
+    const words = spoken.split(/\s+/).length;
     // Engines sometimes never fire onend. While the voice is paused, the wait starts over.
     let watchdog;
     const arm = () => { watchdog = setTimeout(() => (audioPaused ? arm() : finish()), 2500 + words * 520); };
     arm();
     speaking = item;
     if (!tts) { if (item.showWords) wordField.sentence(item.text, null); setTimeout(finish, 400 + words * 60); return; }
-    const u = new SpeechSynthesisUtterance(item.text);
+    const u = new SpeechSynthesisUtterance(spoken);
     if (item.showWords) wordField.sentence(item.text, u);
     if (voice) u.voice = voice;
     u.lang = (voice && voice.lang) || cfg.lang; u.rate = 1.02; u.pitch = 1;
     u.onboundary = (ev) => { if (ev.name === 'word' || ev.name === undefined) scene.pulse(0.06 + 0.12 * (scene.state.energy || 0)); };
-    u.onstart = () => scene.pulse(0.15);
-    u.onend = finish; u.onerror = finish;
+    u.onstart = () => { voiceBlockNoted = false; scene.pulse(0.15); };
+    u.onend = finish;
+    u.onerror = (e) => {
+      // Browsers refuse to speak ("not-allowed") until the page has had a click or key press, and when the site's
+      // Autoplay setting blocks sound. Without this note the reply would go by in silence.
+      if (e.error === 'not-allowed' && !voiceBlockNoted) {
+        voiceBlockNoted = true;
+        ui.note(`${isBrave ? 'Brave' : 'Your browser'} blocked Claude’s voice. Click anywhere on the page, or allow Autoplay for this site in the site settings (left of the address).`, 15000);
+      }
+      finish();
+    };
     tts.speak(u);
   }
   function afterSpeech() {
@@ -1384,7 +1649,7 @@
     if (queuedTurn) { const t = queuedTurn; queuedTurn = ''; handleUtterance(t); }
   }
   function interrupt() {
-    if (abortCtl) abortCtl.abort();
+    if (abortCtl) { abortCtl.abort(); stoppingRun(); }
     speakQueue = []; streamDone = true;
     const s = speaking; speaking = null; currentSentence = '';
     if (tts) tts.cancel();
@@ -1420,8 +1685,8 @@
 
   window.ClaudeVoice = {
     start, stop, interrupt,
-    /** The words and summary stay up after a conversation ends, until the next reply; this clears them sooner. */
-    clearWords: () => wordField.clear(),
+    /** The words, summary and important text stay up after a conversation ends, until the next reply; this clears them sooner. */
+    clearWords: () => { wordField.clear(); ui.important(''); },
     /** Pause (true) or resume (false) Claude's voice, or its motion: the canvas and floating words. */
     pauseAudio: (p = true) => setAudioPaused(p),
     pauseMotion: (p = true) => setMotionPaused(p),

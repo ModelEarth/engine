@@ -3,7 +3,8 @@
 
 import { SYSTEM_PROMPT } from './voice-prompt.js';
 
-export async function streamClaude({ apiKey, model, messages, maxTokens = 700, signal, onText }) {
+// onUsage, if given, gets the reply's token counts ({ input, cacheRead, cacheWrite, output }) once it's complete.
+export async function streamClaude({ apiKey, model, system = SYSTEM_PROMPT, messages, maxTokens = 700, signal, onText, onUsage }) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     signal,
@@ -12,7 +13,7 @@ export async function streamClaude({ apiKey, model, messages, maxTokens = 700, s
       'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
     },
-    body: JSON.stringify({ model, max_tokens: maxTokens, system: SYSTEM_PROMPT, messages, stream: true }),
+    body: JSON.stringify({ model, max_tokens: maxTokens, system, messages, stream: true }),
   });
 
   if (!res.ok || !res.body) {
@@ -22,7 +23,7 @@ export async function streamClaude({ apiKey, model, messages, maxTokens = 700, s
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
-  let buf = '';
+  let buf = '', usage = {};
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -35,7 +36,12 @@ export async function streamClaude({ apiKey, model, messages, maxTokens = 700, s
       let evt;
       try { evt = JSON.parse(line.slice(5)); } catch { continue; }
       if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') onText(evt.delta.text);
+      else if (evt.type === 'message_start' && evt.message?.usage) {
+        const u = evt.message.usage;
+        usage = { input: u.input_tokens, cacheRead: u.cache_read_input_tokens, cacheWrite: u.cache_creation_input_tokens, output: u.output_tokens };
+      } else if (evt.type === 'message_delta' && evt.usage) usage.output = evt.usage.output_tokens;
       else if (evt.type === 'error') throw new Error(evt.error?.message || 'Claude API stream error');
     }
   }
+  if (onUsage) onUsage(usage);
 }

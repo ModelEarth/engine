@@ -11,7 +11,7 @@
 //   CLAUDE_MODEL       (optional, default claude-opus-5-5)
 //   ALLOWED_ORIGINS    (optional, comma-separated; default = same origin only)
 
-import { DEFAULT_MODEL, sanitizeMessages } from '../shared/voice-prompt.js';
+import { DEFAULT_MODEL, sanitizeMessages, systemPrompt } from '../shared/voice-prompt.js';
 import { streamClaude } from '../shared/anthropic.js';
 
 export const CLAUDE_VOICE_PATH = '/api/claude-voice';
@@ -44,11 +44,12 @@ export async function handleClaudeVoice(request, env, ctx) {
     if (!success) return Response.json({ error: 'Too many requests' }, { status: 429, headers: cors });
   }
 
-  let messages = null;
+  let messages = null, output = null;
   try {
     const body = await request.text();
-    if (body.length <= 200_000) messages = sanitizeMessages(JSON.parse(body).messages);
-  } catch { /* fall through */ }
+    if (body.length <= 200_000) ({ messages, output } = JSON.parse(body));
+    messages = sanitizeMessages(messages);
+  } catch { messages = null; }
   if (!messages) return Response.json({ error: 'Bad request' }, { status: 400, headers: cors });
 
   const { readable, writable } = new TransformStream();
@@ -56,14 +57,19 @@ export async function handleClaudeVoice(request, env, ctx) {
   const enc = new TextEncoder();
   const send = (obj) => writer.write(enc.encode(JSON.stringify(obj) + '\n')).catch(() => {});
 
+  const model = env.CLAUDE_MODEL || DEFAULT_MODEL;
   const work = (async () => {
     try {
+      // For the settings panel's Agent section: what's answering, then the reply's token counts.
+      await send({ t: 'agent', v: { name: 'Claude API', detail: 'the site\'s API key', model } });
       await streamClaude({
         apiKey: env.ANTHROPIC_API_KEY,
-        model: env.CLAUDE_MODEL || DEFAULT_MODEL,
+        model,
+        system: systemPrompt(output),
         messages,
         signal: request.signal,
         onText: (text) => send({ t: 'text', v: text }),
+        onUsage: (usage) => send({ t: 'usage', v: usage }),
       });
       await send({ t: 'done' });
     } catch (err) {

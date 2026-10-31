@@ -38,6 +38,33 @@ Spoken reply rules:
 - Speech recognition can mishear words; infer the most likely meaning rather than commenting on typos.
 - The person ends the conversation by saying "thanks", so do not ask whether they need anything else.`;
 
+// Added for the "Text Output" choices in claude-voice.js's settings panel (the request's "output" field).
+const IMPORTANT_RULES = `
+
+Every reply MUST also have exactly one important tag on its own line, after the spoken reply and before the summary:
+<important>The moon's pull raises two tides a day.</important>
+- The fact, figure, name or step most worth remembering from your reply, in fewer than 20 words: shorter and plainer than what you said.
+- Plain text on a single line, shown on screen and never spoken.`;
+
+const WORD_SET_RULES = `
+
+Key words from your reply float on screen as you say them. Mark the groups of words whose meaning depends on staying together with double square brackets, so they show as one: "The [[Federal Reserve]] raised [[interest rates]] to [[five percent]]."
+- Mark one to three per sentence, two to four words each: names, terms, numbers with their units, and phrases such as [[not guilty]] or [[climate change]].
+- Mark only words you say, in the spoken reply. The brackets are removed before speaking.`;
+
+// Conversation Text off: the page hides the captions, usually while someone presents, so the spoken exchange stays short.
+const QUIET_RULES = `
+
+The on-screen conversation text is hidden, usually because the person is presenting to others, so keep the exchange minimal:
+- Answer in one or two short sentences, unless they ask for more.
+- Say only the answer: no greeting, no restating the question, and no remarks about what you're doing or about to do.`;
+
+/** The system prompt for one request. output: { conversation, important, sets } from the page's Text Output choices. */
+export function systemPrompt(output) {
+  return SYSTEM_PROMPT + (output?.conversation === false ? QUIET_RULES : '')
+    + (output?.important === true ? IMPORTANT_RULES : '') + (output?.sets === true ? WORD_SET_RULES : '');
+}
+
 /** Normalise and cap the client-supplied conversation. Returns null if invalid. */
 export function sanitizeMessages(input, { maxTurns = 30, maxChars = 4000 } = {}) {
   if (!Array.isArray(input) || input.length === 0) return null;
