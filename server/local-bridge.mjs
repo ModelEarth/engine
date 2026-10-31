@@ -230,7 +230,7 @@ const server = http.createServer(async (req, res) => {
     if (!originAllowed(origin)) { res.writeHead(403); return res.end('Origin not allowed'); }
     const cors = origin ? { 'access-control-allow-origin': origin, vary: 'Origin' } : {};
     if (req.method === 'OPTIONS') {
-      res.writeHead(204, { ...cors, 'access-control-allow-methods': 'POST, GET, OPTIONS', 'access-control-allow-headers': 'content-type', 'access-control-max-age': '600' });
+      res.writeHead(204, { ...cors, 'access-control-allow-methods': 'POST, GET, OPTIONS', 'access-control-allow-headers': 'content-type, x-team-passphrase', 'access-control-max-age': '600' });
       return res.end();
     }
     if (url.pathname.endsWith('/health')) {

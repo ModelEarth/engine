@@ -10,9 +10,13 @@
 //   ANTHROPIC_API_KEY  (secret, required)
 //   CLAUDE_MODEL       (optional, default claude-opus-5-5)
 //   ALLOWED_ORIGINS    (optional, comma-separated; default = same origin only)
+//   TEAM_PASSPHRASE    (secret, optional): when set, each request needs it (shared/passphrase.js). claude-voice.js
+//                      asks for it on a 401 and keeps it in the browser, so only people given it use the key.
+//                      handleClaudeVoice(..., { passphrase: true }) requires one to be set.
 
 import { DEFAULT_MODEL, sanitizeMessages, systemPrompt } from '../shared/voice-prompt.js';
 import { streamClaude } from '../shared/anthropic.js';
+import { PASSPHRASE_HEADER, passphraseRefusal } from '../shared/passphrase.js';
 
 export const CLAUDE_VOICE_PATH = '/api/claude-voice';
 
@@ -27,15 +31,18 @@ function corsHeaders(request, env) {
   return { ok: false, headers: {} };
 }
 
-export async function handleClaudeVoice(request, env, ctx) {
+export async function handleClaudeVoice(request, env, ctx, { passphrase: required = false } = {}) {
   const { ok, headers: cors } = corsHeaders(request, env);
   if (!ok) return new Response('Origin not allowed', { status: 403 });
 
   if (request.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: { ...cors, 'access-control-allow-methods': 'POST, OPTIONS', 'access-control-allow-headers': 'content-type', 'access-control-max-age': '600' } });
+    return new Response(null, { status: 204, headers: { ...cors, 'access-control-allow-methods': 'POST, OPTIONS', 'access-control-allow-headers': `content-type, ${PASSPHRASE_HEADER}`, 'access-control-max-age': '600' } });
   }
   if (request.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: cors });
   if (!env.ANTHROPIC_API_KEY) return Response.json({ error: 'ANTHROPIC_API_KEY secret is not set' }, { status: 500, headers: cors });
+
+  const refusal = await passphraseRefusal(request, env, { required, to: 'talk to Claude' });
+  if (refusal) return Response.json({ error: refusal.error, passphrase: refusal.passphrase }, { status: refusal.status, headers: cors });
 
   // Optional: bind a Cloudflare rate limiter named CLAUDE_VOICE_LIMITER in wrangler config.
   if (env.CLAUDE_VOICE_LIMITER) {

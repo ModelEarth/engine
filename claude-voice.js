@@ -41,6 +41,8 @@
  *   data-mic-level     "false" to skip the mic-level glow (if your device can't share the mic)
  *
  * No keys live in this file. It talks only to your own endpoint (local bridge or Cloudflare Worker).
+ * When the Worker asks for the site's passphrase (TEAM_PASSPHRASE), a field for it shows. The passphrase is kept in
+ * this browser's localStorage and sent with each request, so it's entered once for every tab on the site.
  * API: window.ClaudeVoice.{start, stop, say, end, interrupt, setMood, clearWords, pauseAudio, pauseMotion, on}
  */
 (function () {
@@ -775,7 +777,7 @@
 
   // ------------------------------------------------------------------ UI (shadow DOM so page CSS never collides)
   function UI(host, actions) {
-    if (cfg.ui === 'none') return { setState() {}, user() {}, claude() {}, important() {}, note() {}, fade() {}, showInput() {}, setVoices() {}, setVoiceMode() {}, setVoiceInfo() {}, setTextOutput() {}, setPaused() {}, setAgent() {}, play: null };
+    if (cfg.ui === 'none') return { setState() {}, user() {}, claude() {}, important() {}, note() {}, fade() {}, showInput() {}, askPassphrase() {}, setVoices() {}, setVoiceMode() {}, setVoiceInfo() {}, setTextOutput() {}, setPaused() {}, setAgent() {}, play: null };
     let play = ds.playButton ? document.querySelector(ds.playButton) : null;
     const el = document.createElement('div');
     el.className = 'claude-voice-ui';
@@ -856,7 +858,7 @@
         .kb svg { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
         form { display: none; width: min(440px, 100%); }
         form.on { display: flex; gap: 6px; }
-        input[type="text"] { flex: 1; min-width: 0; padding: 9px 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,.2);
+        input[type="text"], input[type="password"] { flex: 1; min-width: 0; padding: 9px 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,.2);
                 background: rgba(10,12,20,.55); color: #fff; font-size: 14px; outline: none; }
         .minimal .cap { display: none; }
         /* The page's play button (data-play-button), or this widget's own when the page has none, at the row's right end, in a pill that grows upward over the
@@ -881,6 +883,7 @@
         <div class="cap claude" aria-live="polite"></div>
         <div class="cap notice" role="status"></div>
         <form><input type="text" placeholder="Type to Claude…" aria-label="Message Claude"><button type="submit">Send</button></form>
+        <form class="pass"><input type="password" placeholder="Site passphrase" aria-label="Site passphrase" autocomplete="current-password"><button type="submit">Unlock</button></form>
         <div class="panel" id="cv-settings" role="group" aria-label="Voice settings">
           <label>Voice
             <select class="vmode">
@@ -948,6 +951,8 @@
       if (on) actions.panelOpened();
     };
     form.addEventListener('submit', (e) => { e.preventDefault(); showPanel(false); const v = input.value.trim(); if (v) { input.value = ''; actions.typed(v); } });
+    const passForm = $('.pass'), passInput = $('.pass input');
+    passForm.addEventListener('submit', (e) => { e.preventDefault(); const v = passInput.value.trim(); if (v) { passInput.value = ''; passForm.classList.remove('on'); actions.passphrase(v); } });
     // A click anywhere off the panel (and off its ⚙ button, which toggles it) closes it, Send included.
     // Captured on window, so the page's own handlers can't stop it. On click rather than pointerdown: the typing box sits
     // above the panel, so closing the panel on press would move Send out from under the pointer before the click lands.
@@ -977,7 +982,7 @@
     const ctl = $('.ctl');
     let ctlOpen = false;
     const showing = (c) => !!c.textContent && c.style.opacity !== '0' && c.getClientRects().length > 0; // not hidden by a Text Output choice
-    const syncOpen = () => el.toggleAttribute('data-open', ctlOpen || panel.classList.contains('on') || form.classList.contains('on')
+    const syncOpen = () => el.toggleAttribute('data-open', ctlOpen || panel.classList.contains('on') || form.classList.contains('on') || passForm.classList.contains('on')
       || [userCap, claudeCap, importantCap, noticeCap].some(showing));
     new MutationObserver(syncOpen).observe(root, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'style'] });
     {
@@ -1006,6 +1011,7 @@
       },
       fade(ms = 8000) { clearTimeout(fadeTimer); fadeTimer = setTimeout(() => { claudeCap.style.opacity = 0; userCap.textContent = ''; }, ms); },
       showInput() { form.classList.add('on'); },
+      askPassphrase() { passForm.classList.add('on'); passInput.focus(); },
       setVoices(list, selected) {
         const groups = [];
         list.forEach((v) => { const t = voiceTier(v); (groups[t] = groups[t] || []).push(v); });
@@ -1096,6 +1102,11 @@
       if (mode === 'off' || mode === 'wake' || mode === 'error') return beginConversation(text, true);
       if (mode === 'speaking' || mode === 'thinking') interrupt();
       handleUtterance(text);
+    },
+    passphrase(value) {
+      store(PASS_KEY, value);
+      const t = lockedText; lockedText = '';
+      if (t) this.typed(t); // ask again the question that waited for it
     },
     voiceMode(m) {
       voiceMode = m; currentURI = '';
@@ -1206,6 +1217,11 @@
     if (v !== null && v !== 'random') chosenVoice = v; // "random" was stored here by an earlier version
   } catch (e) { /* storage blocked */ }
   function store(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* storage blocked */ } }
+
+  // The site's passphrase, when its Worker asks for one (TEAM_PASSPHRASE): kept in this browser for every tab on the site.
+  const PASS_KEY = 'team-passphrase'; // shared/passphrase.js's PASSPHRASE_STORAGE_KEY, which other pages on the site also read
+  let lockedText = ''; // the question that waited for the passphrase
+  function passphrase() { try { return localStorage.getItem(PASS_KEY) || ''; } catch (e) { return ''; } }
   ui.setVoiceMode(voiceMode);
 
   // Text Output, also in the settings panel: which kinds of text show (data-text-output, then this browser's choices).
@@ -1479,10 +1495,13 @@
     try {
       const res = await fetch(cfg.endpoint, {
         method: 'POST', signal: ctl.signal,
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...(passphrase() && { 'x-team-passphrase': passphrase() }) },
         body: JSON.stringify({ messages: history, output: { conversation: textOut.conversation, important: textOut.important, sets: textOut.words && textOut.sets && !wordField.off } }),
       });
-      if (!res.ok || !res.body) throw new Error(`Endpoint replied ${res.status}`);
+      if (!res.ok || !res.body) {
+        const body = await res.json().catch(() => ({}));
+        throw Object.assign(new Error(body.error || `Endpoint replied ${res.status}`), { passphrase: res.status === 401 && body.passphrase });
+      }
       const reader = res.body.getReader(), dec = new TextDecoder();
       let buf = '';
       for (;;) {
@@ -1518,9 +1537,14 @@
         ? (isLocal ? 'I can’t reach the local bridge. Start it with: node engine/server/local-bridge.mjs' : 'I can’t reach the server right now.')
         : err.message;
       endRun(thisRun, 'error', msg);
-      history.pop();
+      const asked = history.pop();
       ui.note(msg, 12000);
-      enqueueSpeech('Sorry, I couldn’t reach Claude just then.');
+      if (err.passphrase) {
+        // The stored passphrase (if any) didn't match: forget it, and ask the question again once a new one is entered.
+        try { localStorage.removeItem(PASS_KEY); } catch (e) { /* storage blocked */ }
+        lockedText = asked && asked.role === 'user' ? asked.content : '';
+        ui.askPassphrase();
+      } else enqueueSpeech('Sorry, I couldn’t reach Claude just then.');
     } finally {
       if (abortCtl === ctl) abortCtl = null;
       streamDone = true;
