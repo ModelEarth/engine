@@ -1515,6 +1515,7 @@
           let evt; try { evt = JSON.parse(line); } catch { continue; }
           if (evt.t === 'text') take(evt.v);
           else if (evt.t === 'error') throw new Error(evt.v);
+          else if (evt.t === 'note') ui.note(evt.v, 15000); // e.g. why Gemini is answering instead of Claude
           else if (evt.t === 'agent') { agent = evt.v; showAgent(); }
           else if (evt.t === 'tool') { thisRun.tools++; thisRun.activity = `${evt.v.name} ${evt.v.target || ''}`.trim(); showAgent(); }
           else if (evt.t === 'usage') { thisRun.usage = evt.v; showAgent(); }

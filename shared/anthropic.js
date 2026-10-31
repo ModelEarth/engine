@@ -2,8 +2,10 @@
 // Runs unchanged in Node 18+ and Cloudflare Workers (fetch + web streams).
 
 import { SYSTEM_PROMPT } from './voice-prompt.js';
+import { ProviderError, providerError } from './provider-error.js';
 
 // onUsage, if given, gets the reply's token counts ({ input, cacheRead, cacheWrite, output }) once it's complete.
+// A refusal throws a ProviderError (provider-error.js), which says whether the key is invalid or out of credits.
 export async function streamClaude({ apiKey, model, system = SYSTEM_PROMPT, messages, maxTokens = 700, signal, onText, onUsage }) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -17,8 +19,7 @@ export async function streamClaude({ apiKey, model, system = SYSTEM_PROMPT, mess
   });
 
   if (!res.ok || !res.body) {
-    const detail = await res.text().catch(() => '');
-    throw new Error(`Claude API ${res.status}: ${detail.slice(0, 300)}`);
+    throw providerError('Claude', res.status, await res.text().catch(() => ''));
   }
 
   const reader = res.body.getReader();
@@ -40,7 +41,11 @@ export async function streamClaude({ apiKey, model, system = SYSTEM_PROMPT, mess
         const u = evt.message.usage;
         usage = { input: u.input_tokens, cacheRead: u.cache_read_input_tokens, cacheWrite: u.cache_creation_input_tokens, output: u.output_tokens };
       } else if (evt.type === 'message_delta' && evt.usage) usage.output = evt.usage.output_tokens;
-      else if (evt.type === 'error') throw new Error(evt.error?.message || 'Claude API stream error');
+      else if (evt.type === 'error') {
+        const busy = evt.error?.type === 'overloaded_error';
+        throw new ProviderError('Claude', busy ? 529 : 500, evt.error?.message || '', busy ? 'busy' : 'other',
+          busy ? 'Claude is busy right now (529).' : `Claude API stream error: ${evt.error?.message || 'unknown'}`);
+      }
     }
   }
   if (onUsage) onUsage(usage);
