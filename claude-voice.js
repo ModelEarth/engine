@@ -797,7 +797,7 @@
         if (!active) return;
         pinned = true;
         const items = list.map((text, i) => ({ word: text, step: i ? 3 : 4, minStep: 1 }));
-        if (action) items.splice(1, 0, { word: action.label, step: 3, minStep: 2, action: action.onClick });
+        if (action) items.splice(1, 0, { word: action.label, step: 1, minStep: 0, action: action.onClick }); // a button, sized as a smaller word
         items.forEach((k, i) => timers.push(setTimeout(() => show({ ...k, lower: k.word.toLowerCase(), index: 0, score: 2, keep: true }), 200 + i * 900)));
       },
       /** Blurred (true) behind a panel laid over them, such as the keys panel; its button can't be clicked meanwhile. */
@@ -1218,7 +1218,7 @@
     hold() { const p = !(audioPaused || motionPaused); setAudioPaused(p); setMotionPaused(p); }, // the widget's own play button
     playAdopted() { syncPlayButton(); },
     panelOpened() { checkAgent(); },
-    keys() { if (!hashEdits().includes('keys')) setHashEdits([...hashEdits(), 'keys']); openKeysPanel(); },
+    keys: setMyKeys,
     textOutput(name, on) {
       textOut[name] = on;
       store(TEXT_KEY, JSON.stringify(textOut));
@@ -1453,6 +1453,8 @@
     history.replaceState(history.state, '', location.pathname + location.search + (rest.length ? '#' + rest.join('&') : ''));
   }
   const keysFromHash = () => { if (hashEdits().includes('keys') && !keysPanel) openKeysPanel(); };
+  // Set My Keys (the Large Words' button, the settings panel's Keys): edit=keys in the hash, and the keys panel.
+  function setMyKeys() { if (!hashEdits().includes('keys')) setHashEdits([...hashEdits(), 'keys']); openKeysPanel(); }
   if (document.readyState === 'complete') setTimeout(keysFromHash);
   else window.addEventListener('load', () => setTimeout(keysFromHash));
   window.addEventListener('hashchange', keysFromHash);
@@ -1789,7 +1791,7 @@
       } else {
         if (ownFailed) msg += ` Update it on the Keys page (${KEYS_PAGE}).`;
         else if (err.keys || err.passphrase) msg += ` ${err.passphrase ? 'Or add' : 'You can add'} your own AI key (Claude, Gemini, OpenAI and others) on the Keys page (${KEYS_PAGE}).`;
-        if (ownFailed || err.keys || err.passphrase) wordField.phrases(KEY_PHRASES, { label: 'Set My Keys', onClick: openKeysPanel }); // a key is needed: say so in the Large Words too
+        if (ownFailed || err.keys || err.passphrase) wordField.phrases(KEY_PHRASES, { label: 'Set My Keys', onClick: setMyKeys }); // a key is needed: say so in the Large Words too
         const asked = history.pop();
         ui.note(msg, 12000);
         if (err.passphrase) {
@@ -1970,7 +1972,7 @@
     pauseAudio: (p = true) => setAudioPaused(p),
     pauseMotion: (p = true) => setMotionPaused(p),
     /** Open the /keys page's list of keys on this page, as the "Set My Keys" button does. */
-    openKeys: () => openKeysPanel(),
+    openKeys: () => setMyKeys(),
     end: () => endConversation(true),
     /** Feed text as if it were spoken (useful for testing and for custom inputs). */
     say(text) { if (mode === 'off' || mode === 'wake' || mode === 'error') { const m = text.match(WAKE_RE); if (m) return beginConversation(text.slice(m.index + m[0].length).trim()); return beginConversation(text, true); } if (mode === 'speaking' || mode === 'thinking') interrupt(); handleUtterance(text); },
