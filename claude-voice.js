@@ -29,7 +29,8 @@
  *                      Claude replies, a click on it pauses or resumes Claude's voice and motion; otherwise it does its own job.
  *   data-words         "false" to skip the keywords that float over the target while Claude speaks
  *   data-words-replace CSS selector of content to fade out while keywords show (default: the target's own content,
- *                      except elements marked data-words-stay, such as a scene picture behind the words)
+ *                      except elements marked data-words-stay, such as a scene picture behind the words).
+ *                      An element with data-words-dim="0.7" fades only to that opacity instead, staying in view and clickable.
  *   data-words-unless  CSS selector of displays that keep the floating words away: while one is visible as a reply starts,
  *                      that reply shows no words and leaves the page's content as it is (localsite: the Earth map)
  *   data-text-output   the ⚙ panel's Text Output choices that start on, separated by spaces or commas: conversation
@@ -47,7 +48,7 @@
  * (Claude, Gemini, OpenAI, xAI, Groq, Perplexity or Pollinations, tried in that order) is used instead; without one,
  * the note says it can be added there, and the Large Words ask for one, with a "Set My Keys" button that opens the
  * /keys page's list of keys on this page (keys/key-manager.js, loaded then). edit=keys in the page's hash (edit can list
- * several, comma-separated) opens that list too.
+ * several, comma-separated) opens that list too, and the Keys button in the settings panel's Agent section adds it.
  * API: window.ClaudeVoice.{start, stop, say, end, interrupt, setMood, clearWords, pauseAudio, pauseMotion, openKeys, on}
  */
 (function () {
@@ -601,7 +602,7 @@
       : host === document.body ? []
       : [...host.children].filter((c) => c !== layer && c.tagName !== 'SCRIPT' && !c.hasAttribute('data-words-stay')
         && !/\bclaude-voice-/.test(c.getAttribute('class') || '')));
-    const showPage = (on) => pageEls().forEach((c) => { c.style.transition = 'opacity .6s ease'; c.style.opacity = on ? '' : '0'; });
+    const showPage = (on) => pageEls().forEach((c) => { c.style.transition = 'opacity .6s ease'; c.style.opacity = on ? '' : (c.dataset.wordsDim || '0'); });
     const span = () => Math.min(layer.clientWidth, layer.clientHeight * 1.6);
     // While motion is paused, words still come and go, but without moving: entrances and exits jump to their end, and the drift holds.
     const hold = (anims) => { if (still) anims.forEach((a) => (a.effect.getTiming().iterations === Infinity ? a.pause() : a.finish())); };
@@ -856,6 +857,16 @@
         .important::before { content: "Important"; display: block; margin-bottom: 3px; font-size: 11px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; opacity: .6; }
         /* Text Output choices that are off. Hidden captions still update, and Claude keeps listening; notes (errors and status) still show. */
         .no-conversation .user, .no-conversation .claude, .no-important .important { display: none; }
+        /* Once the reply's captions fade at the end of a conversation, a circle in the important box's lower right shows the
+           full reply again, and hides it. */
+        .important { position: relative; }
+        .important:has(.more-text:not([hidden])) { padding-right: 38px; }
+        .cap[hidden], .important .more-text[hidden], .no-conversation .more-text { display: none; }
+        .important .more-text { position: absolute; right: 6px; bottom: 6px; width: 26px; height: 26px; padding: 0; justify-content: center;
+                                border-radius: 50%; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2); backdrop-filter: none; -webkit-backdrop-filter: none; }
+        .important .more-text:hover { background: rgba(255,255,255,.2); }
+        .more-text svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+        .more-text[aria-expanded="true"] svg { transform: rotate(180deg); }
         /* While the settings panel is open, it takes the captions' place. */
         .settings-open .cap { display: none; }
         .row { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; align-items: center; }
@@ -935,7 +946,7 @@
         ::slotted([slot="play"]:focus-visible) { outline: 2px solid #fff; outline-offset: -2px; }
       </style>
       <div class="wrap ${cfg.ui === 'minimal' ? 'minimal' : ''}" data-s="off">
-        <div class="cap important" aria-live="polite"></div>
+        <div class="cap important" hidden><span class="important-text" aria-live="polite"></span><button type="button" class="more-text" aria-expanded="false" title="Show the full reply" aria-label="Show the full reply" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></div>
         <div class="cap user" aria-live="polite"></div>
         <div class="cap claude" aria-live="polite"></div>
         <div class="cap notice" role="status"></div>
@@ -959,7 +970,7 @@
             <label class="check"><input type="checkbox" name="sets"><span>Precise Word Sets<small>Claude marks words that belong together, such as "interest rates", so they show as one.</small></span></label>
           </div>
           <div class="agent" role="group" aria-labelledby="cv-agent">
-            <div class="head"><span id="cv-agent">Agent</span><a class="btn-sm" href="/keys/" target="agents">Keys</a></div>
+            <div class="head"><span id="cv-agent">Agent</span><a class="btn-sm keys" href="#edit=keys" title="Set My Keys">Keys</a></div>
             <div class="agent-name"></div>
             <div class="agent-status hint" aria-live="polite"></div>
             <div class="hint"><span class="agent-usage"></span> <button class="link agent-more" type="button" aria-expanded="false">Details</button><span class="agent-via" hidden></span></div>
@@ -1007,6 +1018,8 @@
       panel.classList.toggle('on', on); wrap.classList.toggle('settings-open', on); gear.setAttribute('aria-expanded', String(on));
       if (on) actions.panelOpened();
     };
+    // Keys: edit=keys in this page's hash, which opens the keys panel here.
+    $('.agent .keys').addEventListener('click', (e) => { e.preventDefault(); showPanel(false); actions.keys(); });
     form.addEventListener('submit', (e) => { e.preventDefault(); showPanel(false); const v = input.value.trim(); if (v) { input.value = ''; actions.typed(v); } });
     const passForm = $('.pass'), passInput = $('.pass input');
     passForm.addEventListener('submit', (e) => { e.preventDefault(); const v = passInput.value.trim(); if (v) { passInput.value = ''; passForm.classList.remove('on'); actions.passphrase(v); } });
@@ -1056,17 +1069,42 @@
       btn.setAttribute('aria-pressed', String(paused)); btn.title = t; btn.setAttribute('aria-label', t);
     };
     let fadeTimer, noteTimer;
+    // The circle in the important box: shown once the reply's captions have faded, it shows the last reply again (open) or hides it.
+    // A hidden reply leaves the layout once it has faded out, so the important box moves down into its place.
+    // instant: hidden at once, without the fade, as when the circle hides it.
+    let replyText = '', collapseTimer;
+    const showReply = (on, instant) => {
+      clearTimeout(collapseTimer);
+      if (on) claudeCap.hidden = false;
+      claudeCap.style.opacity = on ? 1 : 0;
+      if (!on && instant) claudeCap.hidden = true;
+      else if (!on) collapseTimer = setTimeout(() => { claudeCap.hidden = true; }, 600); // the caption's opacity transition
+    };
+    const importantText = $('.important-text'), moreBtn = $('.more-text');
+    const showMore = (open, gone) => {
+      moreBtn.hidden = !!gone;
+      moreBtn.setAttribute('aria-expanded', String(open));
+      const t = open ? 'Hide the full reply' : 'Show the full reply';
+      moreBtn.title = t; moreBtn.setAttribute('aria-label', t);
+    };
+    moreBtn.addEventListener('click', () => {
+      const open = moreBtn.getAttribute('aria-expanded') !== 'true';
+      if (open) claudeCap.textContent = replyText;
+      showReply(open, true);
+      showMore(open);
+    });
     return {
       setState(s, text) { wrap.dataset.s = s; label.textContent = text; },
       user(t) { userCap.textContent = t ? `“${t}”` : ''; },
-      claude(t) { claudeCap.textContent = t; claudeCap.style.opacity = 1; clearTimeout(fadeTimer); },
-      important(t) { importantCap.textContent = t; },
+      /** aside: a line of the widget's own, such as the farewell, which the circle in the important box doesn't bring back. */
+      claude(t, aside) { if (!aside) replyText = t; claudeCap.textContent = t; showReply(true); clearTimeout(fadeTimer); showMore(false, true); },
+      important(t) { importantText.textContent = t; importantCap.hidden = !t; },
       /** Status and errors, in a box of their own so a reply streaming into the captions can't overwrite them. */
       note(t, ms = 6000) {
         noticeCap.textContent = t; noticeCap.style.opacity = 1; clearTimeout(noteTimer);
         noteTimer = setTimeout(() => { noticeCap.style.opacity = 0; noteTimer = setTimeout(() => { noticeCap.textContent = ''; }, 600); }, ms);
       },
-      fade(ms = 8000) { clearTimeout(fadeTimer); fadeTimer = setTimeout(() => { claudeCap.style.opacity = 0; userCap.textContent = ''; }, ms); },
+      fade(ms = 8000) { clearTimeout(fadeTimer); fadeTimer = setTimeout(() => { showReply(false); userCap.textContent = ''; showMore(false, !replyText); }, ms); },
       showInput() { form.classList.add('on'); },
       askPassphrase() { passForm.classList.add('on'); passInput.focus(); },
       setVoices(list, selected) {
@@ -1180,6 +1218,7 @@
     hold() { const p = !(audioPaused || motionPaused); setAudioPaused(p); setMotionPaused(p); }, // the widget's own play button
     playAdopted() { syncPlayButton(); },
     panelOpened() { checkAgent(); },
+    keys() { if (!hashEdits().includes('keys')) setHashEdits([...hashEdits(), 'keys']); openKeysPanel(); },
     textOutput(name, on) {
       textOut[name] = on;
       store(TEXT_KEY, JSON.stringify(textOut));
@@ -1407,8 +1446,7 @@
     return m ? decodeURIComponent(m[1]).split(',').map((e) => e.trim().toLowerCase()).filter(Boolean) : [];
   }
   function setHashEdits(list) {
-    const m = location.hash.match(/[#&]edit=([^&]*)/);
-    if (!m || hashEdits().join(',') === list.join(',')) return;
+    if (hashEdits().join(',') === list.join(',')) return;
     if (typeof window.goHashQuiet === 'function') return window.goHashQuiet(list.length ? { edit: list.join(',') } : {}, list.length ? [] : ['edit']);
     const rest = location.hash.slice(1).split('&').filter((p) => p && !p.startsWith('edit='));
     if (list.length) rest.push('edit=' + list.join(','));
@@ -1604,7 +1642,7 @@
     const done = () => { setMode('wake'); scene.applyMood(MOODS.idle); ui.fade(4000); wordField.finish(); emit('end', { history: history.slice() }); };
     if (sayGoodbye) {
       const bye = FAREWELLS[Math.floor(Math.random() * FAREWELLS.length)];
-      ui.claude(bye);
+      ui.claude(bye, true);
       speakQueue = []; streamDone = true;
       enqueueSpeech(bye, done);
     } else done();
@@ -1694,7 +1732,8 @@
         method: 'POST', signal: ctl.signal,
         headers: { 'content-type': 'application/json',
           ...(ownKey ? { 'x-provider-name': ownKey.name, 'x-provider-key': ownKey.key } : passphrase() && { 'x-team-passphrase': passphrase() }) },
-        body: JSON.stringify({ messages: history, output: { conversation: textOut.conversation, important: textOut.important, sets: textOut.words && textOut.sets && !wordField.off } }),
+        // page: where the person is on the site, so Claude can tell what they're looking at
+        body: JSON.stringify({ messages: history, page: location.pathname + location.hash, output: { conversation: textOut.conversation, important: textOut.important, sets: textOut.words && textOut.sets && !wordField.off } }),
       });
       if (!res.ok || !res.body) {
         const body = await res.json().catch(() => ({}));

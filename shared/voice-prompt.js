@@ -62,9 +62,33 @@ The on-screen conversation text is hidden, usually because the person is present
 /** The prompt introduces Claude; another model answering says who it is instead. who: e.g. "Gemini", "an OpenAI model". */
 export const standingIn = (system, who) => system.replace(/^You are Claude,/, `You are ${who}, standing in for Claude,`);
 
-/** The system prompt for one request. output: { conversation, important, sets } from the page's Text Output choices. */
-export function systemPrompt(output) {
-  return SYSTEM_PROMPT + (output?.conversation === false ? QUIET_RULES : '')
+/** The page the person is on (the request's "page" field: its path and hash), cleaned up for the prompt, or '' when there's none. */
+export function pagePath(page) {
+  if (typeof page !== 'string' || !page.startsWith('/')) return '';
+  return page.replace(/[^\w\-./~%#&=+,:;@!$*'()]/g, '').slice(0, 300);
+}
+
+/** The site file a page path is served from, relative to the webroot: a folder's index.html, without the hash or query. */
+export function pageFile(page) {
+  const path = pagePath(page).replace(/[?#].*$/, '').split('/').filter((p) => p && p !== '.' && p !== '..').join('/');
+  if (!path) return 'index.html';
+  return /\.[a-z0-9]+$/i.test(path) ? path : path + '/index.html';
+}
+
+// Where the person is, from the request's "page" field: what they're looking at as they talk.
+const pageRules = (path) => `
+
+Where the person is: they're looking at this website's page ${path} as they talk to you.
+- Questions about "this page", "the current page", "this map", "here", "what I'm looking at", or anything shown on screen, without naming another page, are about that page. Answer about it directly, without asking which page they mean.
+- The path says which page it is, and the part after # holds its current settings (such as the state, view or report chosen), so tell them about what they're seeing now.
+- For questions about the site in general, or about another page, answer as usual.`;
+
+/** The system prompt for one request. output: { conversation, important, sets } from the page's Text Output choices.
+    page: the path (and hash) of the page the person is on. */
+export function systemPrompt(output, page) {
+  const path = pagePath(page);
+  return SYSTEM_PROMPT + (path ? pageRules(path) : '')
+    + (output?.conversation === false ? QUIET_RULES : '')
     + (output?.important === true ? IMPORTANT_RULES : '') + (output?.sets === true ? WORD_SET_RULES : '');
 }
 

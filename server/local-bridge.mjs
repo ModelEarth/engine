@@ -16,7 +16,7 @@ import { readFileSync, existsSync, statSync, createReadStream, mkdtempSync } fro
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_MODEL, sanitizeMessages, systemPrompt, transcriptPrompt } from '../shared/voice-prompt.js';
+import { DEFAULT_MODEL, pageFile, pagePath, sanitizeMessages, systemPrompt, transcriptPrompt } from '../shared/voice-prompt.js';
 import { streamClaude } from '../shared/anthropic.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -77,7 +77,8 @@ const READ_FILES = process.env.CLI_READ_FILES !== 'false';
 const SECRET_FILES = ['**/.env', '**/.env.*', '**/.envrc', '**/.dev.vars', '**/*.pem', '**/*.key'];
 const CLI_SETTINGS = JSON.stringify({ permissions: { allow: [`Read(/${WEBROOT}/**)`], deny: SECRET_FILES.map((p) => `Read(${p})`) } });
 // quiet: the page hides its conversation text (Text Output in claude-voice.js), so Claude looks first and says only the answer.
-const filesPrompt = (quiet) => `
+// page: the path of the page the person is on, whose own files are where a question about it starts.
+const filesPrompt = (quiet, page) => `
 
 Files: you're running on the developer's own computer, in the folder holding this website's source files (${WEBROOT}).
 When a question is about this site, its pages, code, data or documentation, look at its files with Read, Glob and Grep, then answer from what you found.
@@ -87,7 +88,8 @@ ${quiet
     ? '- Look before you say anything, then give just the answer.'
     : '- Before your first look, say in a few words what you\'re checking, so the person hears from you while you look. Then carry on once you\'ve looked.'}
 - Everything you write, before and after looking, is one spoken reply: the mood header only once, at the very start, and the summary only once, at the very end.
-- Tell what you found as you would in conversation: name files and folders plainly, without spelling out paths or reading code aloud.`;
+- Tell what you found as you would in conversation: name files and folders plainly, without spelling out paths or reading code aloud.${pagePath(page) ? `
+- A question about the page they're on starts with that page's own files: read ${pageFile(page)}, then the README.md in its folder if there is one, and answer from those. Look further only when they don't answer it, and don't start from the site's root README.` : ''}`;
 
 // The agent answering, as the settings panel's Agent section names it (also sent with each reply and from /status).
 const AGENT = BACKEND === 'api'
@@ -101,7 +103,7 @@ let lastRun = null, runCount = 0;
 const inWebroot = (p) => (p && path.isAbsolute(p) && p.startsWith(WEBROOT + path.sep) ? path.relative(WEBROOT, p) : p);
 
 // onInfo gets { pid }, { tool: { name, target } } and { usage: {...} } as they happen.
-function askCli(messages, system, onText, signal, output, onInfo = () => {}) {
+function askCli(messages, system, onText, signal, output, onInfo = () => {}, page = '') {
   const access = READ_FILES
     ? ['--tools', 'Read,Glob,Grep', '--permission-mode', 'dontAsk', '--settings', CLI_SETTINGS]
     : ['--tools', ''];
@@ -116,7 +118,7 @@ function askCli(messages, system, onText, signal, output, onInfo = () => {}) {
       '--output-format', 'stream-json',
       '--verbose',
       '--include-partial-messages',
-      '--system-prompt', READ_FILES ? system + filesPrompt(output?.conversation === false) : system,
+      '--system-prompt', READ_FILES ? system + filesPrompt(output?.conversation === false, page) : system,
       ...access,
       '--setting-sources', '',
       '--strict-mcp-config',
@@ -245,8 +247,8 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method !== 'POST') { res.writeHead(405, cors); return res.end(); }
 
-    let messages, output;
-    try { ({ messages, output } = JSON.parse(await readBody(req))); messages = sanitizeMessages(messages); } catch { messages = null; }
+    let messages, output, page;
+    try { ({ messages, output, page } = JSON.parse(await readBody(req))); messages = sanitizeMessages(messages); } catch { messages = null; }
     if (!messages) { res.writeHead(400, { ...cors, 'content-type': 'application/json' }); return res.end('{"error":"Bad request"}'); }
 
     res.writeHead(200, { ...cors, 'content-type': 'application/x-ndjson; charset=utf-8', 'cache-control': 'no-store', 'x-accel-buffering': 'no' });
@@ -264,7 +266,7 @@ const server = http.createServer(async (req, res) => {
       if (info.usage) { usage = info.usage; send({ t: 'usage', v: usage }); }
     };
     try {
-      await (BACKEND === 'api' ? askApi : askCli)(messages, systemPrompt(output), (text) => send({ t: 'text', v: text }), ac.signal, output, onInfo);
+      await (BACKEND === 'api' ? askApi : askCli)(messages, systemPrompt(output, page), (text) => send({ t: 'text', v: text }), ac.signal, output, onInfo, page);
       if (ac.signal.aborted) outcome = 'stopped';
       send({ t: 'done' });
       log(`${outcome === 'stopped' ? 'stopped' : 'answered'} via ${BACKEND} in ${Date.now() - started} ms`);

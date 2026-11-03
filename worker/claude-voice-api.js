@@ -79,10 +79,10 @@ export async function handleClaudeVoice(request, env, ctx, { passphrase: require
     if (!success) return Response.json({ error: 'Too many requests' }, { status: 429, headers: cors });
   }
 
-  let messages = null, output = null;
+  let messages = null, output = null, page = null;
   try {
     const body = await request.text();
-    if (body.length <= 200_000) ({ messages, output } = JSON.parse(body));
+    if (body.length <= 200_000) ({ messages, output, page } = JSON.parse(body));
     messages = sanitizeMessages(messages);
   } catch { messages = null; }
   if (!messages) return Response.json({ error: 'Bad request' }, { status: 400, headers: cors });
@@ -93,7 +93,7 @@ export async function handleClaudeVoice(request, env, ctx, { passphrase: require
   const send = (obj) => writer.write(enc.encode(JSON.stringify(obj) + '\n')).catch(() => {});
 
   // Claude first, then Gemini. A provider that fails before saying anything hands over to the next one.
-  const system = systemPrompt(output);
+  const system = systemPrompt(output, page);
   const claude = (apiKey) => ({ name: 'Claude', model: env.CLAUDE_MODEL || DEFAULT_MODEL,
     stream: (o) => streamClaude({ ...o, apiKey, model: env.CLAUDE_MODEL || DEFAULT_MODEL, system }) });
   const gemini = (apiKey) => ({ name: 'Gemini', model: env.GEMINI_MODEL || GEMINI_DEFAULT_MODEL,
