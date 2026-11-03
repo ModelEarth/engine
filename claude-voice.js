@@ -1731,7 +1731,9 @@
       const res = await fetch(cfg.endpoint, {
         method: 'POST', signal: ctl.signal,
         headers: { 'content-type': 'application/json',
-          ...(ownKey ? { 'x-provider-name': ownKey.name, 'x-provider-key': ownKey.key } : passphrase() && { 'x-team-passphrase': passphrase() }) },
+          ...(ownKey && { 'x-provider-name': ownKey.name, 'x-provider-key': ownKey.key }),
+          // With their own key too, so a Worker that gives Claude tools (such as reading the site's code) can tell it's the team.
+          ...(passphrase() && { 'x-team-passphrase': passphrase() }) },
         // page: where the person is on the site, so Claude can tell what they're looking at
         body: JSON.stringify({ messages: history, page: location.pathname + location.hash, output: { conversation: textOut.conversation, important: textOut.important, sets: textOut.words && textOut.sets && !wordField.off } }),
       });

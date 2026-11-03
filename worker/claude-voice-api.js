@@ -20,6 +20,12 @@
 //   TEAM_PASSPHRASE    (secret, optional): when set, each request needs it (shared/passphrase.js). claude-voice.js
 //                      asks for it on a 401 and keeps it in the browser, so only people given it use the key.
 //                      handleClaudeVoice(..., { passphrase: true }) requires one to be set.
+//
+// handleClaudeVoice(..., { tools: (env, { origin, page }) => toolkit }) gives Claude tools of its own, such as reading
+// the site's code (CloudRoot's worker/src/site-code.js reads it from GitHub, where the local bridge reads files). Only
+// for requests with the team passphrase, since tools can spend the site's tokens: the site's keys, or a visitor's own
+// Claude key sent with the passphrase. toolkit: { definitions, run(name, input), target(name, input), prompt (added to
+// the system prompt), label (for the settings panel's Agent section) }; see streamClaude in shared/anthropic.js.
 
 import { DEFAULT_MODEL, sanitizeMessages, standingIn, systemPrompt } from '../shared/voice-prompt.js';
 import { streamClaude } from '../shared/anthropic.js';
@@ -52,7 +58,7 @@ function corsHeaders(request, env) {
   return { ok: false, headers: {} };
 }
 
-export async function handleClaudeVoice(request, env, ctx, { passphrase: required = false } = {}) {
+export async function handleClaudeVoice(request, env, ctx, { passphrase: required = false, tools = null } = {}) {
   const { ok, headers: cors } = corsHeaders(request, env);
   if (!ok) return new Response('Origin not allowed', { status: 403 });
 
@@ -94,12 +100,16 @@ export async function handleClaudeVoice(request, env, ctx, { passphrase: require
 
   // Claude first, then Gemini. A provider that fails before saying anything hands over to the next one.
   const system = systemPrompt(output, page);
-  const claude = (apiKey) => ({ name: 'Claude', model: env.CLAUDE_MODEL || DEFAULT_MODEL,
-    stream: (o) => streamClaude({ ...o, apiKey, model: env.CLAUDE_MODEL || DEFAULT_MODEL, system }) });
   const gemini = (apiKey) => ({ name: 'Gemini', model: env.GEMINI_MODEL || GEMINI_DEFAULT_MODEL,
     stream: (o) => streamGemini({ ...o, apiKey, model: env.GEMINI_MODEL || GEMINI_DEFAULT_MODEL, system: standingIn(system, 'Gemini') }) });
   const openaiStyle = (p, apiKey) => ({ name: p.name, model: p.model,
     stream: (o) => streamOpenAICompat({ ...o, provider: p.name, url: p.url, apiKey, model: p.model, system: standingIn(system, p.who) }) });
+  // Tools only for those with the passphrase (a visitor using their own key may send it too), even where it isn't required.
+  const team = tools && !(await passphraseRefusal(request, env, { required: true }));
+  const toolkit = team ? tools(env, { origin: new URL(request.url).origin, page }) : null;
+  const claude = (apiKey) => ({ name: 'Claude', model: env.CLAUDE_MODEL || DEFAULT_MODEL, files: toolkit?.label,
+    stream: (o) => streamClaude({ ...o, apiKey, model: env.CLAUDE_MODEL || DEFAULT_MODEL, system: toolkit ? system + toolkit.prompt : system,
+      tools: toolkit, onTool: (tool) => send({ t: 'tool', v: tool }) }) });
   const providers = own
     ? [own.name === 'Claude' ? claude(ownKey) : own.name === 'Gemini' ? gemini(ownKey) : openaiStyle(own, ownKey)]
     : [env.ANTHROPIC_API_KEY && claude(env.ANTHROPIC_API_KEY), env.GEMINI_API_KEY && gemini(env.GEMINI_API_KEY)].filter(Boolean);
@@ -111,7 +121,7 @@ export async function handleClaudeVoice(request, env, ctx, { passphrase: require
         let spoke = false;
         try {
           // For the settings panel's Agent section: what's answering, then the reply's token counts.
-          await send({ t: 'agent', v: { name: `${p.name} API`, detail: whose, model: p.model } });
+          await send({ t: 'agent', v: { name: `${p.name} API`, detail: whose, model: p.model, ...(p.files && { files: p.files }) } });
           await p.stream({
             messages,
             signal: request.signal,
