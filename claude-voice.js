@@ -854,7 +854,7 @@
         .cap:empty { display: none; }
         .user { font-style: italic; opacity: .85; font-size: 14px; }
         .important { font-size: 16px; font-weight: 600; }
-        .important::before { content: "Important"; display: block; margin-bottom: 3px; font-size: 11px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; opacity: .6; }
+        .important::before { content: "Conversation"; display: block; margin-bottom: 3px; font-size: 11px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; opacity: .6; }
         /* Text Output choices that are off. Hidden captions still update, and Claude keeps listening; notes (errors and status) still show. */
         .no-conversation .user, .no-conversation .claude, .no-important .important { display: none; }
         /* Once the reply's captions fade at the end of a conversation, a circle in the important box's lower right shows the
@@ -1096,8 +1096,9 @@
     return {
       setState(s, text) { wrap.dataset.s = s; label.textContent = text; },
       user(t) { userCap.textContent = t ? `“${t}”` : ''; },
-      /** aside: a line of the widget's own, such as the farewell, which the circle in the important box doesn't bring back. */
-      claude(t, aside) { if (!aside) replyText = t; claudeCap.textContent = t; showReply(true); clearTimeout(fadeTimer); showMore(false, true); },
+      /** aside: a line of the widget's own, such as the farewell, which the circle in the important box doesn't bring back.
+       *  It takes the reply's place at once, so the circle shows then to bring the reply back. */
+      claude(t, aside) { if (!aside) replyText = t; claudeCap.textContent = t; showReply(true); clearTimeout(fadeTimer); showMore(false, !aside || !replyText); },
       important(t) { importantText.textContent = t; importantCap.hidden = !t; },
       /** Status and errors, in a box of their own so a reply streaming into the captions can't overwrite them. */
       note(t, ms = 6000) {
