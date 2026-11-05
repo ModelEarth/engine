@@ -10,7 +10,8 @@
  *
  * Script attributes (all optional):
  *   data-target        CSS selector of the div to animate (default: the script's parent div, else <body>)
- *   data-endpoint      API URL (default: local bridge on localhost, /api/claude-voice elsewhere)
+ *   data-endpoint      API URL (default: local bridge on localhost, else /api/claude-voice on the site this script came
+ *                      from, such as neighborhood.org for a page on another site that loads localsite from there)
  *   data-bridge-port   port of server/local-bridge.mjs (default 8790)
  *   data-lang          speech language (default: page lang or en-US)
  *   data-voice         part of a preferred TTS voice name, e.g. "Samantha" or "Google UK English Female"
@@ -60,10 +61,11 @@
   const ds = (script && script.dataset) || {};
   const isLocal = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || location.hostname.endsWith('.localhost');
   const bridgePort = String(ds.bridgePort || 8790);
+  const scriptOrigin = (() => { try { return new URL(script.src).origin; } catch (e) { return location.origin; } })();
   const cfg = {
     endpoint: ds.endpoint || (isLocal && location.port !== bridgePort
       ? `http://127.0.0.1:${bridgePort}/api/claude-voice`
-      : '/api/claude-voice'),
+      : (scriptOrigin === location.origin ? '' : scriptOrigin) + '/api/claude-voice'),
     lang: ds.lang || document.documentElement.lang || 'en-US',
     voice: ds.voice || '',
     voiceMode: ds.voiceMode || '',
@@ -1323,7 +1325,7 @@
   // The visitor's own AI key from the /keys page (keys/key-manager.js), for when the site's keys can't answer. If one
   // fails, the next saved one is tried. That page keeps keys in localStorage "settings_api-keys", either plain or encrypted with an AES key it keeps
   // in IndexedDB ("km-store"). "rsa:" ones only a server could read, so they're skipped.
-  const KEYS_PAGE = '/keys/';
+  const KEYS_PAGE = (scriptOrigin === location.origin ? '' : scriptOrigin) + '/keys/'; // on the site this script came from
   const KEY_PHRASES = ['Please enter your LLM Key', 'Get Started', 'One Big Adventure']; // floated as Large Words while a key is needed
   // The /keys page's provider ids that can hold a conversation (worker/claude-voice-api.js OWN_PROVIDERS), in order.
   const OWN_LABEL = { anthropic: 'Claude', google: 'Gemini', openai: 'OpenAI', xai: 'xAI', groq: 'Groq', perplexity: 'Perplexity', pollinations: 'Pollinations' };
