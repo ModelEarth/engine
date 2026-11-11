@@ -1324,7 +1324,7 @@
 
   // The visitor's own AI key from the /keys page (keys/key-manager.js), for when the site's keys can't answer. If one
   // fails, the next saved one is tried. That page keeps keys in localStorage "settings_api-keys", either plain or encrypted with an AES key it keeps
-  // in IndexedDB ("km-store"). "rsa:" ones only a server could read, so they're skipped.
+  // in IndexedDB ("km-store"). "rsa:" ones only the server can read, so they're sent as they are.
   const KEYS_PAGE = (scriptOrigin === location.origin ? '' : scriptOrigin) + '/keys/'; // on the site this script came from
   const KEY_PHRASES = ['Please enter your LLM Key', 'Get Started', 'One Big Adventure']; // floated as Large Words while a key is needed
   // The /keys page's provider ids that can hold a conversation (worker/claude-voice-api.js OWN_PROVIDERS), in order.
@@ -1336,8 +1336,8 @@
     try { saved = JSON.parse(localStorage.getItem('settings_api-keys') || '{}'); } catch (e) { return null; }
     for (const name of Object.keys(OWN_LABEL)) {
       const v = saved && saved[name];
-      if (typeof v !== 'string' || !v || v.startsWith('rsa:')) continue;
-      const key = /^[A-Za-z0-9+/]+=*:[A-Za-z0-9+/]+=*$/.test(v) ? await decryptSavedKey(v).catch(() => '') : v;
+      if (typeof v !== 'string' || !v) continue;
+      const key = !v.startsWith('rsa:') && /^[A-Za-z0-9+/]+=*:[A-Za-z0-9+/]+=*$/.test(v) ? await decryptSavedKey(v).catch(() => '') : v;
       if (key && !failedOwnKeys.has(key)) return { name, key };
     }
     return null;
