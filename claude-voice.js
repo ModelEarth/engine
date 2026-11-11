@@ -1202,9 +1202,8 @@
       handleUtterance(text);
     },
     passphrase(value) {
-      store(PASS_KEY, value);
       const t = lockedText; lockedText = '';
-      if (t) this.typed(t); // ask again the question that waited for it
+      submitPassphrase(value).then(() => { if (t) this.typed(t); }); // ask again the question that waited for it
     },
     voiceMode(m) {
       voiceMode = m; currentURI = '';
@@ -1318,9 +1317,44 @@
   function store(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* storage blocked */ } }
 
   // The site's passphrase, when its Worker asks for one (TEAM_PASSPHRASE): kept in this browser for every tab on the site.
-  const PASS_KEY = 'team-passphrase'; // shared/passphrase.js's PASSPHRASE_STORAGE_KEY, which other pages on the site also read
+  // The team's passphrase (shared/passphrase.js) is traded once for a cookie that page scripts can't read, so it isn't
+  // kept in this browser. Only where that cookie can't be used (the local bridge, or a browser that blocks it for
+  // another site) is it held in memory for this page, and sent as a header.
+  const PASS_KEY = 'team-passphrase'; // where older versions kept it in plain text: traded for the cookie, then removed
+  const PASS_SET_KEY = 'team-passphrase-set'; // "1" once this browser has the cookie (not the passphrase)
+  const viaBridge = !ds.endpoint && isLocal && location.port !== bridgePort;
+  const passphraseURL = (() => {
+    try { return viaBridge ? '' : new URL('/api/team-passphrase', new URL(cfg.endpoint, location.href)).href; } catch (e) { return ''; }
+  })();
+  let passInMemory = '';
+  let passJustTraded = false; // traded for the cookie, with no reply since to show the cookie works
+  let passCookieFailed = false; // traded, yet refused: this browser doesn't send the cookie here
   let lockedText = ''; // the question that waited for the passphrase
-  function passphrase() { try { return localStorage.getItem(PASS_KEY) || ''; } catch (e) { return ''; } }
+  function passphrase() { return passInMemory; }
+  function hasPassphrase() {
+    if (passInMemory) return true;
+    try { return localStorage.getItem(PASS_SET_KEY) === '1'; } catch (e) { return false; }
+  }
+  async function tradePassphrase(value) {
+    if (!passphraseURL) return false;
+    try {
+      const res = await fetch(passphraseURL, { method: 'POST', credentials: 'include',
+        headers: { 'content-type': 'application/json' }, body: JSON.stringify({ passphrase: value }) });
+      return res.status === 204;
+    } catch (e) { return false; }
+  }
+  async function submitPassphrase(value) {
+    const cookie = !passCookieFailed && await tradePassphrase(value);
+    passInMemory = cookie ? '' : value;
+    passJustTraded = cookie;
+    if (cookie) store(PASS_SET_KEY, '1');
+  }
+  // A passphrase an older version left in plain text: trade it for the cookie and remove it.
+  (() => {
+    let old = '';
+    try { old = localStorage.getItem(PASS_KEY) || ''; localStorage.removeItem(PASS_KEY); } catch (e) { /* storage blocked */ }
+    if (old) submitPassphrase(old);
+  })();
 
   // The visitor's own AI key from the /keys page (keys/key-manager.js), for when the site's keys can't answer. If one
   // fails, the next saved one is tried. That page keeps keys in localStorage "settings_api-keys", either plain or encrypted with an AES key it keeps
@@ -1734,7 +1768,7 @@
     let retry = false; // with the visitor's own key, once the site's keys couldn't answer
     try {
       const res = await fetch(cfg.endpoint, {
-        method: 'POST', signal: ctl.signal,
+        method: 'POST', signal: ctl.signal, credentials: viaBridge ? 'same-origin' : 'include', // the passphrase's cookie
         headers: { 'content-type': 'application/json',
           ...(ownKey && { 'x-provider-name': ownKey.name, 'x-provider-key': ownKey.key }),
           // With their own key too, so a Worker that gives Claude tools (such as reading the site's code) can tell it's the team.
@@ -1775,6 +1809,7 @@
       if (raw.trim()) history.push({ role: 'assistant', content: raw.trim() });
       emit('reply', { text: unmark(forSpeech(spokenText)) });
       endRun(thisRun, 'done');
+      passJustTraded = false;
     } catch (err) {
       if (ctl.signal.aborted) return;
       console.warn('[claude-voice]', err);
@@ -1785,7 +1820,7 @@
       if (ownFailed) { failedOwnKeys.add(ownFailed.key); ownKey = null; }
       // The site's keys all failed, this visitor has no passphrase, or their own key failed: answer with their (next)
       // saved key from the Keys page.
-      const own = ownFailed || err.keys || (err.passphrase && !passphrase()) ? await savedKey() : null;
+      const own = ownFailed || err.keys || (err.passphrase && !hasPassphrase()) ? await savedKey() : null;
       endRun(thisRun, 'error', msg);
       if (own) {
         ownKey = own;
@@ -1798,8 +1833,11 @@
         const asked = history.pop();
         ui.note(msg, 12000);
         if (err.passphrase) {
-          // The stored passphrase (if any) didn't match: forget it, and ask the question again once a new one is entered.
-          try { localStorage.removeItem(PASS_KEY); } catch (e) { /* storage blocked */ }
+          // The passphrase (if any) didn't work: forget it, and ask the question again once a new one is entered. Refused
+          // right after a trade means the cookie isn't sent here, so the next one is kept in memory instead.
+          if (passJustTraded) passCookieFailed = true;
+          passInMemory = ''; passJustTraded = false;
+          try { localStorage.removeItem(PASS_SET_KEY); } catch (e) { /* storage blocked */ }
           lockedText = asked && asked.role === 'user' ? asked.content : '';
           ui.askPassphrase();
         } else enqueueSpeech('Sorry, I couldn’t reach Claude just then.');

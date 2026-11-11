@@ -18,7 +18,8 @@
 //   GEMINI_MODEL       (optional, default gemini-flash-latest)
 //   ALLOWED_ORIGINS    (optional, comma-separated; default = same origin only)
 //   TEAM_PASSPHRASE    (secret, optional): when set, each request needs it (shared/passphrase.js). claude-voice.js
-//                      asks for it on a 401 and keeps it in the browser, so only people given it use the key.
+//                      asks for it on a 401 and trades it at /api/team-passphrase for a cookie page scripts can't
+//                      read (handleTeamPassphrase there), so only people given it use the key.
 //                      handleClaudeVoice(..., { passphrase: true }) requires one to be set.
 //
 // handleClaudeVoice(..., { tools: (env, { origin, page }) => toolkit }) gives Claude tools of its own, such as reading
@@ -53,7 +54,8 @@ function corsHeaders(request, env) {
   const self = new URL(request.url).origin;
   const allowed = (env.ALLOWED_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
   if (origin === self || allowed.includes(origin)) {
-    return { ok: true, headers: { 'access-control-allow-origin': origin, vary: 'Origin' } };
+    // Credentials: the team passphrase's cookie, from a page on an allowed site.
+    return { ok: true, headers: { 'access-control-allow-origin': origin, 'access-control-allow-credentials': 'true', vary: 'Origin' } };
   }
   return { ok: false, headers: {} };
 }
