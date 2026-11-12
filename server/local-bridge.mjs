@@ -102,7 +102,7 @@ const running = new Map();
 let lastRun = null, runCount = 0;
 const inWebroot = (p) => (p && path.isAbsolute(p) && p.startsWith(WEBROOT + path.sep) ? path.relative(WEBROOT, p) : p);
 
-// onInfo gets { pid }, { tool: { name, target } } and { usage: {...} } as they happen.
+// onInfo gets { pid }, { tool: { name, target } }, { thinking } (Claude's thinking, when the model thinks) and { usage: {...} } as they happen.
 function askCli(messages, system, onText, signal, output, onInfo = () => {}, page = '') {
   const access = READ_FILES
     ? ['--tools', 'Read,Glob,Grep', '--permission-mode', 'dontAsk', '--settings', CLI_SETTINGS]
@@ -126,7 +126,7 @@ function askCli(messages, system, onText, signal, output, onInfo = () => {}, pag
     ], { cwd: READ_FILES ? WEBROOT : cliWorkDir, env, stdio: ['pipe', 'pipe', 'pipe'] });
     onInfo({ pid: child.pid });
 
-    let streamed = false, newMessage = false;
+    let streamed = false, newMessage = false, thought = false;
     let finalText = '';
     let stderr = '';
     let buf = '';
@@ -155,11 +155,13 @@ function askCli(messages, system, onText, signal, output, onInfo = () => {}, pag
             streamed = true;
             onText(e.delta.text);
           }
+          if (e.type === 'content_block_delta' && e.delta?.type === 'thinking_delta' && e.delta.thinking) { thought = true; onInfo({ thinking: e.delta.thinking }); }
         } else if (evt.type === 'assistant') {
           for (const block of evt.message?.content || []) {
             if (block.type === 'tool_use') onInfo({ tool: { name: block.name, target: inWebroot(block.input?.file_path || block.input?.path || '') || block.input?.pattern || '' } });
             // Older CLIs without partial messages: emit whole assistant text blocks.
             else if (block.type === 'text' && !streamed) finalText += block.text;
+            else if (block.type === 'thinking' && !thought && block.thinking) onInfo({ thinking: block.thinking });
           }
         } else if (evt.type === 'result') {
           if (evt.is_error) stderr += String(evt.result || evt.subtype || 'CLI error');
@@ -191,7 +193,7 @@ function askCli(messages, system, onText, signal, output, onInfo = () => {}, pag
 
 function askApi(messages, system, onText, signal, output, onInfo = () => {}) {
   if (!process.env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY is not set in .env');
-  return streamClaude({ apiKey: process.env.ANTHROPIC_API_KEY, model: MODEL, system, messages, signal, onText, onUsage: (usage) => onInfo({ usage }) });
+  return streamClaude({ apiKey: process.env.ANTHROPIC_API_KEY, model: MODEL, system, messages, signal, onText, onUsage: (usage) => onInfo({ usage }), onThinking: (thinking) => onInfo({ thinking }) });
 }
 
 // ---------- HTTP ----------
@@ -264,6 +266,7 @@ const server = http.createServer(async (req, res) => {
       if (info.pid) run.pid = info.pid;
       if (info.tool) { run.tools++; run.activity = `${info.tool.name} ${info.tool.target}`.trim(); send({ t: 'tool', v: info.tool }); }
       if (info.usage) { usage = info.usage; send({ t: 'usage', v: usage }); }
+      if (info.thinking) send({ t: 'thinking', v: info.thinking });
     };
     try {
       await (BACKEND === 'api' ? askApi : askCli)(messages, systemPrompt(output, page), (text) => send({ t: 'text', v: text }), ac.signal, output, onInfo, page);

@@ -33,13 +33,16 @@
  *                      except elements marked data-words-stay, such as a scene picture behind the words).
  *                      An element with data-words-dim="0.7" fades only to that opacity instead, staying in view and clickable.
  *                      Words keep clear of the target's own controls (positioned, with a z-index above 1) and of elements
- *                      anywhere on the page marked data-words-avoid.
- *   data-words-unless  CSS selector of displays that keep the floating words away: while one is visible as a reply starts,
- *                      that reply shows no words and leaves the page's content as it is (localsite: the Earth map)
+ *                      anywhere on the page marked data-words-avoid. Words that end up behind the widget's captions or
+ *                      panels, as these grow, fade to 10% until they're clear.
+ *   data-words-unless  CSS selector of displays that keep the floating words out of sight (localsite: the Earth map):
+ *                      while one is visible, the words are still made as Claude replies, but hidden, and the page's
+ *                      content is left as it is. They show once it closes, and hide again when one opens.
  *   data-text-output   the ⚙ panel's Text Output choices that start on, separated by spaces or commas: conversation
  *                      (captions of what you and Claude say), important (the key fact of each reply, in a line of its own),
- *                      words (the keywords floating over the target) and sets (Claude marks word groups, such as
- *                      "interest rates", so they float as one). Default: "conversation words sets". The panel overrides
+ *                      align (the caption boxes all as wide as the widest, so their left sides line up as well as their
+ *                      right), words (the keywords floating over the target) and sets (Claude marks word groups, such as
+ *                      "interest rates", so they float as one). Default: "conversation align words sets". The panel overrides
  *                      this and remembers the choices in this browser.
  *   data-autostart    "false" to wait for a click even when the mic is already allowed
  *   data-mic-level     "false" to skip the mic-level glow (if your device can't share the mic)
@@ -52,7 +55,17 @@
  * the note says it can be added there, and the Large Words ask for one, with a "Set My Keys" button that opens the
  * /keys page's list of keys on this page (keys/key-manager.js, loaded then). edit=keys in the page's hash (edit can list
  * several, comma-separated) opens that list too, and the Keys button in the settings panel's Agent section adds it.
- * API: window.ClaudeVoice.{start, stop, say, ask, focusInput, end, interrupt, setMood, clearWords, pauseAudio, pauseMotion, openKeys, on}
+ * The Conversation box (Important Text) has a ⋯ menu: Expand shows the last reply in full again (Shrink hides it), and
+ * Choose lists past conversations, or Show All for every one's text at once. They're kept in this browser's localStorage
+ * (claude-voice:conversations, the last 50), apart from the page's own framing of a question it asks (ask's context).
+ * The box shows while Claude is paused, even with Important Text off. A small light bulb in the reply's upper right shows
+ * the reply's extras above its text, in the same box: Claude's thinking (when the model thinks), tags the agent opened
+ * with, the mood header, tool calls written into the reply as text (taken out of what's shown and said), the tools used
+ * and the summary words. A click on a summary word, there or in the summary line among the large words, adds it to the
+ * typing box. Each reply's extras are kept with it (thinking cut to its first 2,000 characters), so replies chosen from
+ * the ⋯ menu have their own light bulbs. Choosing a conversation brings back the mood of its last reply (the colors
+ * and motion), and a reply's light bulb brings back that reply's mood.
+ * API: window.ClaudeVoice.{start, stop, say, ask, focusInput, hideText, end, interrupt, setMood, clearWords, pauseAudio, pauseMotion, openKeys, on}
  */
 (function () {
   'use strict';
@@ -518,6 +531,62 @@
   // Precise word sets: Claude marks word groups that belong together [[like this]] (the "sets" rules in shared/voice-prompt.js).
   // The marks are kept for the word field and taken out of what's spoken and shown as captions.
   const unmark = (s) => s.replace(/\[\[|\]\]/g, '');
+  // Some agents open a reply with a tag of their own, such as <thinking_mode>…</thinking_mode>, that isn't meant to be
+  // seen or said. Leading ones are dropped (not the reply's own mood, important or summary tags): this gives the text
+  // after them, or null while one is still arriving. found, when given, gets each dropped tag's { name, text }.
+  const OWN_TAGS = ['mood', 'important', 'summary'];
+  // Tool-call markup an agent sometimes writes into its reply instead of making the call, such as
+  // <parameter name="limit">60</parameter>. stripStray takes it out of what's shown and said, and gathers it into calls
+  // ({ tool, params }) for the light bulb. It gives the text before any such markup still arriving (out), and that markup
+  // (rest) to try again with the next chunk; final: nothing is held back.
+  const STRAY_TAGS = ['parameter', 'invoke', 'function_calls'];
+  const STRAY_RE = /^<(\/?)(?:[\w-]+:)?(parameter|invoke|function_calls)\b([^<>]*)>/i;
+  function stripStray(s, calls, final) {
+    let out = '';
+    for (;;) {
+      const lt = s.indexOf('<');
+      if (lt < 0) return { out: out + s, rest: '' };
+      out += s.slice(0, lt); s = s.slice(lt);
+      const m = s.match(STRAY_RE);
+      if (m) {
+        const [tag, closing, kind, attrs] = m;
+        const name = (attrs.match(/name="([^"]*)"/) || [])[1] || '';
+        if (kind.toLowerCase() === 'parameter' && !closing) {
+          const end = s.search(/<\/(?:[\w-]+:)?parameter>/i);
+          if (end < 0) {
+            if (!final && s.length < 4000) return { out, rest: s };
+            return { out: out + s, rest: '' };
+          }
+          if (!calls.length || calls[calls.length - 1].done) calls.push({ tool: '', params: {} });
+          calls[calls.length - 1].params[name] = s.slice(tag.length, end).trim();
+          s = s.slice(end).replace(/^<\/[^>]*>/, '');
+        } else {
+          if (kind.toLowerCase() === 'invoke' && !closing) calls.push({ tool: name, params: {} });
+          else if (kind.toLowerCase() === 'invoke' && calls.length) calls[calls.length - 1].done = true;
+          s = s.slice(tag.length);
+        }
+        continue;
+      }
+      // Possibly the start of such markup, still arriving.
+      if (!final && !s.includes('>') && s.length < 400
+        && (/^<\/?[\w:-]*$/.test(s) || /^<\/?(?:[\w-]+:)?(?:parameter|invoke|function_calls)\b[^<>]*$/i.test(s))) return { out, rest: s };
+      out += '<'; s = s.slice(1);
+    }
+  }
+  function dropLeadTags(s, found) {
+    for (;;) {
+      s = s.trimStart();
+      if (!s.startsWith('<')) return s;
+      const open = s.match(/^<([a-z][\w-]*)[^<>]*>/i);
+      if (!open) return /^<(?:[a-z][^<>]*)?$/i.test(s) && s.length < 200 ? null : s; // a tag still arriving, or a "<" of the reply's
+      const name = open[1].toLowerCase();
+      if (OWN_TAGS.includes(name) || STRAY_TAGS.includes(name.replace(/^[\w-]+:/, ''))) return s;
+      const close = s.toLowerCase().indexOf(`</${name}>`, open[0].length);
+      if (close < 0) return s.length < 4000 ? null : s;
+      if (found) found.push({ name, text: s.slice(open[0].length, close).trim() });
+      s = s.slice(close + name.length + 3);
+    }
+  }
   /** The marked word groups of a sentence, each with its position in the sentence once the marks are taken out. */
   function wordSetsOf(marked) {
     const sets = [], re = /\[\[([^\]]+?)\]\]/g;
@@ -557,6 +626,19 @@
     return found.sort((a, b) => b.score - a.score).slice(0, k).filter((f) => f.score > 0.2).sort((a, b) => a.index - b.index);
   }
 
+  // Parts of a finished reply that aren't said, for the light bulb: the agent's own leading tags and the mood header
+  // (parsed, or as it came when it isn't JSON).
+  function replyExtras(raw) {
+    const tags = [];
+    let s = dropLeadTags(raw, tags) || '', mood = null;
+    const m = s.match(/^<mood>([\s\S]*?)<\/mood>/);
+    if (m) {
+      try { mood = JSON.parse(m[1]); } catch (e) { mood = m[1].trim(); }
+      dropLeadTags(s.slice(m[0].length), tags);
+    }
+    return { tags, mood };
+  }
+
   function parseSummary(s) {
     if (!s) return null;
     s = s.replace(/<\/summary>[\s\S]*$/, '').trim();
@@ -566,8 +648,9 @@
   }
 
   function WordField(host) {
-    if (ds.words === 'false') return { begin() {}, sentence() {}, summary() {}, phrases() {}, finish() {}, clear() {}, setPaused() {}, setEnabled() {}, setBlur() {}, off: true };
+    if (ds.words === 'false') return { begin() {}, sentence() {}, summary() {}, phrases() {}, finish() {}, clear() {}, setPaused() {}, setEnabled() {}, setBlur() {}, setCovers() {}, setPick() {}, off: true };
     const MAX_LIVE = 28;
+    const WORDS_WAIT = 3000; // ms a sentence's words wait for its speech to start (sentence())
     // Size steps as fractions of the target's span, from whisper to headline; each word lands on one at random, nudged up by its score.
     const SIZE_STEPS = [0.02, 0.032, 0.05, 0.078, 0.115, 0.16];
     const PAD = 18; // clear space kept around each word, a little more than its drift
@@ -588,6 +671,8 @@
         .w span, .stmt span { display: inline-block; white-space: pre; }
         .stmt { line-height: 1.6; font-weight: 400; letter-spacing: .02em; word-spacing: .3em; color: #fff; opacity: .85; }
         .stmt .sep { margin: 0 .6em; opacity: .55; }
+        /* A click on a summary word puts it in the typing box (setPick). It looks the same; only the cursor shows it. */
+        .stmt .pick { pointer-events: auto; cursor: pointer; }
         .stmt.amid { text-align: center; }
         .stmt.tr { text-align: right; }
         .w.act { pointer-events: auto; cursor: pointer; border: 0; margin: 0; padding: .3em .7em .36em; border-radius: .45em; color: #fff;
@@ -601,6 +686,28 @@
     let pinned = false; // phrases() is showing words of the widget's own, which stay until the next reply
     let enabled = true; // Large Words in the settings panel's Text Output
 
+    // Words and the statement behind the widget's captions and panels (covers(), from setCovers) fade to COVERED_OPACITY,
+    // and come back once they're clear. Checked each frame while any show, since captions grow and words drift.
+    // Words still being placed (hidden) are skipped, since placing sets their own opacity.
+    const COVERED_OPACITY = 0.1;
+    let covers = () => [], coverFrame = 0;
+    let pick = null; // setPick: what a click on a summary word does
+    function dimCovered() {
+      syncAway();
+      const boxes = covers(), els = [...field.querySelectorAll('.w, .stmt')];
+      els.forEach((el) => {
+        if (el.style.visibility === 'hidden') return;
+        const r = el.getBoundingClientRect();
+        const hit = boxes.some((b) => r.left < b.right && b.left < r.right && r.top < b.bottom && b.top < r.bottom);
+        if ((el.dataset.covered === '1') === hit) return;
+        if (hit) { el.dataset.base = el.style.opacity; el.style.opacity = String(COVERED_OPACITY); } else el.style.opacity = el.dataset.base || '';
+        el.dataset.covered = hit ? '1' : '';
+        el.style.transition = 'opacity .3s ease';
+      });
+      coverFrame = els.length ? requestAnimationFrame(dimCovered) : 0;
+    }
+    const watchCovers = () => { if (!coverFrame) coverFrame = requestAnimationFrame(dimCovered); };
+
     // The target's own content (e.g. the demo's heading) steps aside while words are showing.
     const pageEls = () => (ds.wordsReplace ? [...document.querySelectorAll(ds.wordsReplace)]
       : host === document.body ? []
@@ -610,9 +717,18 @@
     const span = () => Math.min(layer.clientWidth, layer.clientHeight * 1.6);
     // While motion is paused, words still come and go, but without moving: entrances and exits jump to their end, and the drift holds.
     const hold = (anims) => { if (still) anims.forEach((a) => (a.effect.getTiming().iterations === Infinity ? a.pause() : a.finish())); };
-    // Another display (data-words-unless) is showing in the target, so the words stay away rather than hide it.
+    // Another display (data-words-unless) is showing in the target, so the words are kept out of sight rather than hide
+    // it, and the page content stays. Checked as each reply starts and each frame while words show (dimCovered).
     const otherDisplay = () => !!ds.wordsUnless && [...document.querySelectorAll(ds.wordsUnless)]
       .some((d) => d.getClientRects().length > 0 && getComputedStyle(d).visibility !== 'hidden');
+    let away = false;
+    function syncAway() {
+      const now = otherDisplay();
+      if (now === away) return;
+      away = now;
+      layer.style.visibility = away ? 'hidden' : '';
+      if (live.length || stmt) { clearTimeout(pageTimer); showPage(away); }
+    }
     // How much a word (or word group) matters: its keyword score, plus a lift once Claude's summary names it.
     const weightOf = (o) => o.score + (o.lower.split(/\s+/).some((w) => keyWords.has(w)) ? 1.5 : 0);
 
@@ -697,6 +813,7 @@
       obstacles = findObstacles();
       el.style.visibility = 'hidden';
       field.appendChild(el);
+      watchCovers();
       // Try one size smaller rather than crowd; if there's still no clear spot, the lighter of this word and those in the way gives way.
       // Kept words (phrases()) never push each other out: they shrink further to find a spot clear of controls and of each
       // other, and otherwise overlap.
@@ -737,9 +854,11 @@
       picks.forEach((p, i) => {
         if (i) { const sep = document.createElement('span'); sep.className = 'sep'; sep.textContent = '·'; el.appendChild(sep); }
         const s = document.createElement('span'); s.textContent = p; el.appendChild(s);
+        if (pick) { s.className = 'pick'; s.addEventListener('click', () => pick(p)); }
       });
       Object.assign(el.style, { left: '0', top: '0', visibility: 'hidden' });
       field.appendChild(el);
+      watchCovers();
       obstacles = findObstacles();
       const W = layer.clientWidth, H = layer.clientHeight;
       if (el.offsetWidth > W * 0.9) el.style.maxWidth = W * 0.6 + 'px'; // a long summary wraps into a narrower block
@@ -772,11 +891,15 @@
         live.forEach((o, i) => fadeOut(o.el, i * 30));
         if (stmt) fadeOut(stmt.el);
         live = []; stmt = null; pinned = false;
-        seen = new Set(); summaryList = null; keyWords = new Set(); active = enabled && !otherDisplay();
-        if (active) { clearTimeout(pageTimer); showPage(false); }
+        seen = new Set(); summaryList = null; keyWords = new Set(); active = enabled;
+        syncAway();
+        if (active && !away) { clearTimeout(pageTimer); showPage(false); }
       },
       /** Show a sentence's keywords as they are spoken: on the engine's word boundaries, or on estimated timing when it sends none.
-          The sentence may hold marked word groups ([[like this]]); positions are in the spoken text, without the marks. */
+          The sentence may hold marked word groups ([[like this]]); positions are in the spoken text, without the marks.
+          They're made whether or not they can be seen now, and whether or not the sentence is heard: speech that fails
+          (blocked before the page has had a click, say) shows them at once, and speech that hasn't started within
+          WORDS_WAIT (the voice paused, or an engine that never starts) shows them on estimated timing. */
       sentence(marked, u) {
         if (!active) return;
         const ks = keywordsOf(marked, seen), text = unmark(marked);
@@ -788,7 +911,11 @@
           ks.forEach((k) => timers.push(setTimeout(() => showOnce(k), ms * k.index / Math.max(1, text.length))));
         };
         if (!u) return schedule();
-        u.addEventListener('start', schedule);
+        let started = false;
+        const begin = (fn) => () => { if (!started) { started = true; fn(); } };
+        u.addEventListener('start', begin(schedule));
+        u.addEventListener('error', begin(() => ks.forEach(showOnce)));
+        timers.push(setTimeout(begin(schedule), WORDS_WAIT));
         u.addEventListener('boundary', (ev) => ks.forEach((k) => { if (ev.charIndex >= k.index) showOnce(k); }));
       },
       summary(list) {
@@ -824,6 +951,10 @@
       },
       clear,
       /** Large Words off: the words and statement go, and the next replies show none. */
+      /** fn: the boxes (client rects) that words behind fade under, such as the widget's captions. */
+      setCovers(fn) { covers = fn; },
+      /** fn(word): called on a click on one of the summary's words. */
+      setPick(fn) { pick = fn; },
       setEnabled(on) {
         enabled = !!on;
         if (!enabled && (live.length || stmt || active)) clear();
@@ -841,7 +972,7 @@
 
   // ------------------------------------------------------------------ UI (shadow DOM so page CSS never collides)
   function UI(host, actions) {
-    if (cfg.ui === 'none') return { setState() {}, user() {}, claude() {}, important() {}, note() {}, fade() {}, showInput() {}, askPassphrase() {}, setVoices() {}, setVoiceMode() {}, setVoiceInfo() {}, setTextOutput() {}, setPaused() {}, setAgent() {}, play: null };
+    if (cfg.ui === 'none') return { setState() {}, user() {}, claude() {}, extras() {}, important() {}, note() {}, fade() {}, showInput() {}, askPassphrase() {}, setVoices() {}, setVoiceMode() {}, setVoiceInfo() {}, setTextOutput() {}, setPaused() {}, setAgent() {}, addInput() {}, hideText() {}, boxes: () => [], play: null };
     let play = ds.playButton ? document.querySelector(ds.playButton) : null;
     const el = document.createElement('div');
     el.className = 'claude-voice-ui';
@@ -859,20 +990,69 @@
                border: 1px solid rgba(255,255,255,.12); transition: opacity .6s ease; max-height: 30vh; overflow: auto; }
         .cap:empty { display: none; }
         .user { font-style: italic; opacity: .85; font-size: 14px; }
+        /* The reply, with a small light bulb in its upper right that shows its extras in a box above it. */
+        .claude { position: relative; }
+        .claude:has(.claude-text:empty) { display: none; }
+        .claude:has(.bulb:not([hidden])) { padding-right: 30px; }
+        .claude .bulb { position: absolute; top: 6px; right: 6px; }
+        .bulb { width: 20px; height: 20px; padding: 0; justify-content: center; border: 0;
+                border-radius: 50%; background: none; backdrop-filter: none; -webkit-backdrop-filter: none; opacity: .5; }
+        .bulb:hover { opacity: 1; background: rgba(255,255,255,.12); }
+        .bulb[aria-expanded="true"] { opacity: 1; color: #f6d36b; }
+        .claude .bulb[hidden] { display: none; }
+        .bulb svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+        .extras { margin: 0 0 21px; font-size: 13px; }
+        .claude:has(.extras:not([hidden])) { max-height: 60vh; }
+        .extras .think { white-space: pre-wrap; font-style: italic; opacity: .85; }
+        /* Key-value pairs, such as a tool call's parameters, each with a note on what it means where one helps. */
+        .extras dl { display: grid; grid-template-columns: max-content 1fr; gap: 3px 10px; margin: 0 0 9px; }
+        .extras dl:last-child { margin-bottom: 0; }
+        .extras dt { font-family: ui-monospace, Menlo, monospace; font-size: 12px; opacity: .65; padding-top: 1px; }
+        .extras dd { margin: 0; overflow-wrap: anywhere; }
+        .extras dd small { display: block; font-size: 12px; opacity: .65; }
+        .extras .pick { cursor: pointer; }
+        .extras h4 { margin: 0 0 3px; font-size: 11px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; opacity: .6; }
+        .extras p { margin: 0 0 9px; }
+        .extras p:last-child { margin-bottom: 0; }
+        .extras .sw { display: inline-block; width: 13px; height: 13px; margin: 0 4px 0 0; border-radius: 4px; vertical-align: -2px; border: 1px solid rgba(255,255,255,.3); }
+        .extras .hex { margin-right: 10px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; opacity: .8; }
         .important { font-size: 16px; font-weight: 600; }
-        .important::before { content: "Conversation"; display: block; margin-bottom: 3px; font-size: 11px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; opacity: .6; }
+        /* The box's title, with a ⋯ menu at its far right. The box doesn't scroll, so the menu can hang outside it; its text does. */
+        .important { position: relative; z-index: 1; overflow: visible; max-height: none; }
+        .important-text { display: block; max-height: 30vh; overflow: auto; }
+        .important-text:empty { display: none; }
+        .imp-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 3px; font-size: 11px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; }
+        .imp-head span { opacity: .6; }
+        .important .dots { margin-right: -6px; width: 24px; height: 18px; padding: 0; justify-content: center; border-radius: 9px; border: 0; background: none;
+                           backdrop-filter: none; -webkit-backdrop-filter: none; opacity: .7; }
+        .important .dots:hover, .important .dots[aria-expanded="true"] { opacity: 1; background: rgba(255,255,255,.14); }
+        .dots svg { width: 16px; height: 16px; fill: currentColor; }
+        /* It opens upward, above the ⋯, since the controls sit at the bottom. */
+        .menu { position: absolute; bottom: calc(100% + 4px); right: 6px; display: flex; flex-direction: column; width: max-content; min-width: 170px;
+                max-width: min(340px, calc(100vw - 44px)); max-height: 45vh; overflow: auto; padding: 4px; border-radius: 12px;
+                font-size: 14px; font-weight: 400; background: rgba(10,12,20,.88); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+                border: 1px solid rgba(255,255,255,.16); box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+        .menu[hidden] { display: none; }
+        .menu button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 7px 12px; border-radius: 8px; border: 0;
+                       background: none; backdrop-filter: none; -webkit-backdrop-filter: none; line-height: 1.3; }
+        .menu button:hover:not(:disabled) { background: rgba(255,255,255,.12); }
+        .menu button:disabled { opacity: .45; cursor: default; }
+        .menu button.all { margin-bottom: 3px; border-bottom: 1px solid rgba(255,255,255,.12); border-radius: 8px 8px 0 0; }
+        .menu small { font-size: 12px; opacity: .6; }
+        /* A past conversation (or all of them), chosen from the menu. */
+        .past { max-height: 45vh; font-size: 15px; }
+        .past section + section { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.12); }
+        .past h4 { margin: 0 0 4px; font-size: 11px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; opacity: .6; }
+        .past p { margin: 0 0 6px; }
+        .past p.you { font-style: italic; opacity: .85; font-size: 14px; }
+        .past .reply { position: relative; padding-right: 26px; }
+        .past .reply .bulb { position: absolute; top: 0; right: 0; }
+        .past .reply .extras { margin-bottom: 12px; }
         /* Text Output choices that are off. Hidden captions still update, and Claude keeps listening; notes (errors and status) still show. */
-        .no-conversation .user, .no-conversation .claude, .no-important .important { display: none; }
-        /* Once the reply's captions fade at the end of a conversation, a circle in the important box's lower right shows the
-           full reply again, and hides it. */
-        .important { position: relative; }
-        .important:has(.more-text:not([hidden])) { padding-right: 38px; }
-        .cap[hidden], .important .more-text[hidden], .no-conversation .more-text { display: none; }
-        .important .more-text { position: absolute; right: 6px; bottom: 6px; width: 26px; height: 26px; padding: 0; justify-content: center;
-                                border-radius: 50%; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2); backdrop-filter: none; -webkit-backdrop-filter: none; }
-        .important .more-text:hover { background: rgba(255,255,255,.2); }
-        .more-text svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-        .more-text[aria-expanded="true"] svg { transform: rotate(180deg); }
+        /* Align Conversation: every box above the controls as wide as the widest, so their left sides line up too. */
+        .align .cap { align-self: stretch; }
+        .no-conversation .user, .no-conversation .claude, .no-important .important:not(.pinned) { display: none; }
+        .cap[hidden] { display: none; }
         /* While the settings panel is open, it takes the captions' place. */
         .settings-open .cap { display: none; }
         .row { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; align-items: center; }
@@ -911,6 +1091,8 @@
                  color: #f4f6fb; font-size: 14px; line-height: normal; cursor: pointer; outline: none; text-overflow: ellipsis;
                  background: rgba(10,12,20,.5) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23f4f6fb' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 14px center;
                  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,.16); }
+        /* The Voice choice is sized like a page's small dropdowns (the Goals page's Live Data): as wide as its text, 34px tall. */
+        select.vmode { align-self: flex-start; width: auto; max-width: 100%; height: auto; padding: 5px 32px 5px 12px; line-height: 1.55; background-position: right 13px center; }
         select:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
         option, optgroup { color: #111; background: #fff; }
         button { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; padding: 9px 14px; border-radius: 999px;
@@ -952,9 +1134,14 @@
         ::slotted([slot="play"]:focus-visible) { outline: 2px solid #fff; outline-offset: -2px; }
       </style>
       <div class="wrap ${cfg.ui === 'minimal' ? 'minimal' : ''}" data-s="off">
-        <div class="cap important" hidden><span class="important-text" aria-live="polite"></span><button type="button" class="more-text" aria-expanded="false" title="Show the full reply" aria-label="Show the full reply" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></div>
+        <div class="cap important" hidden>
+          <div class="imp-head"><span>Conversation</span><button type="button" class="dots" aria-haspopup="menu" aria-expanded="false" title="Conversation options" aria-label="Conversation options"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button></div>
+          <span class="important-text" aria-live="polite"></span>
+          <div class="menu" role="menu" hidden></div>
+        </div>
+        <div class="cap past" hidden></div>
         <div class="cap user" aria-live="polite"></div>
-        <div class="cap claude" aria-live="polite"></div>
+        <div class="cap claude"><button type="button" class="bulb" aria-expanded="false" title="Show the reply's extras" aria-label="Show the reply's extras" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.8 10.6c.6.5.8 1.2.8 1.9V16h6v-.5c0-.7.2-1.4.8-1.9A6 6 0 0 0 12 3z"/></svg></button><div class="extras" hidden></div><span class="claude-text" aria-live="polite"></span></div>
         <div class="cap notice" role="status"></div>
         <form><input type="text" placeholder="Type to Claude…" aria-label="Message Claude"><button type="submit">Send</button></form>
         <form class="pass"><input type="password" placeholder="Site passphrase" aria-label="Site passphrase" autocomplete="current-password"><button type="submit">Unlock</button></form>
@@ -972,6 +1159,7 @@
             <div class="head"><span id="cv-text-out">Text Output</span><button class="details btn-sm" type="button" aria-expanded="false">Details</button></div>
             <label class="check"><input type="checkbox" name="conversation"><span>Conversation Text<small>Captions of what you and Claude say. Claude still listens while they're hidden.</small></span></label>
             <label class="check"><input type="checkbox" name="important"><span>Important Text<small>The key fact of each reply, in fewer words than the conversation.</small></span></label>
+            <label class="check"><input type="checkbox" name="align"><span>Align Conversation<small>All panels are the same width.</small></span></label>
             <label class="check"><input type="checkbox" name="words"><span>Large Words<small>Keywords float over the page, large and small, as Claude speaks.</small></span></label>
             <label class="check"><input type="checkbox" name="sets"><span>Precise Word Sets<small>Claude marks words that belong together, such as "interest rates", so they show as one.</small></span></label>
           </div>
@@ -1016,7 +1204,7 @@
       watch.observe(document.documentElement, { childList: true, subtree: true });
     }
     const $ = (s) => root.querySelector(s);
-    const wrap = $('.wrap'), label = $('.label'), userCap = $('.user'), claudeCap = $('.claude'), importantCap = $('.important'), noticeCap = $('.notice'), form = $('form'), input = $('form input');
+    const wrap = $('.wrap'), label = $('.label'), userCap = $('.user'), claudeCap = $('.claude'), claudeText = $('.claude-text'), importantCap = $('.important'), noticeCap = $('.notice'), pastCap = $('.past'), form = $('form'), input = $('form input');
     $('.pill').addEventListener('click', actions.pill);
     $('.type').addEventListener('click', () => { form.classList.toggle('on'); if (form.classList.contains('on')) input.focus(); });
     const panel = $('.panel'), gear = $('.gear'), modeSel = $('.vmode'), pick = $('.pick'), voiceSel = $('.voice'), hint = $('.hint');
@@ -1059,7 +1247,7 @@
     let ctlOpen = false;
     const showing = (c) => !!c.textContent && c.style.opacity !== '0' && c.getClientRects().length > 0; // not hidden by a Text Output choice
     const syncOpen = () => el.toggleAttribute('data-open', ctlOpen || panel.classList.contains('on') || form.classList.contains('on') || passForm.classList.contains('on')
-      || [userCap, claudeCap, importantCap, noticeCap].some(showing));
+      || [userCap, claudeCap, importantCap, noticeCap, pastCap].some(showing));
     new MutationObserver(syncOpen).observe(root, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'style'] });
     {
       let hover = false, focus = false;
@@ -1075,44 +1263,187 @@
       btn.setAttribute('aria-pressed', String(paused)); btn.title = t; btn.setAttribute('aria-label', t);
     };
     let fadeTimer, noteTimer;
-    // The circle in the important box: shown once the reply's captions have faded, it shows the last reply again (open) or hides it.
     // A hidden reply leaves the layout once it has faded out, so the important box moves down into its place.
-    // instant: hidden at once, without the fade, as when the circle hides it.
+    // instant: hidden at once, without the fade, as when Shrink hides it.
     let replyText = '', collapseTimer;
     const showReply = (on, instant) => {
       clearTimeout(collapseTimer);
       if (on) claudeCap.hidden = false;
+      else showExtras(false);
       claudeCap.style.opacity = on ? 1 : 0;
       if (!on && instant) claudeCap.hidden = true;
       else if (!on) collapseTimer = setTimeout(() => { claudeCap.hidden = true; }, 600); // the caption's opacity transition
     };
-    const importantText = $('.important-text'), moreBtn = $('.more-text');
-    const showMore = (open, gone) => {
-      moreBtn.hidden = !!gone;
-      moreBtn.setAttribute('aria-expanded', String(open));
-      const t = open ? 'Hide the full reply' : 'Show the full reply';
-      moreBtn.title = t; moreBtn.setAttribute('aria-label', t);
+    // The light bulb: the last reply's extras, shown above its text in the same box. Hidden while the caption holds a line
+    // of the widget's own instead of the reply.
+    const bulb = $('.bulb'), extrasCap = $('.extras');
+    let extras = null, asideShown = false;
+    // What a tool call's parameters mean, shown under their values. limit, for a file read, is how many lines it reads.
+    const PARAM_NOTES = {
+      file_path: () => 'The file to read.',
+      limit: (v, p) => `How many lines to read: ${p.offset ? `${v}, starting at line ${p.offset}` : `only the first ${v}`}, not the whole file.`,
+      offset: () => 'The line to start reading at.',
+      pattern: () => 'What to search for.',
+      path: () => 'Where to look.',
     };
-    moreBtn.addEventListener('click', () => {
-      const open = moreBtn.getAttribute('aria-expanded') !== 'true';
-      if (open) claudeCap.textContent = replyText;
-      showReply(open, true);
-      showMore(open);
-    });
+    const make = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+    const bulbSvg = bulb.innerHTML;
+    const setBulb = (b, on) => {
+      b.setAttribute('aria-expanded', String(on));
+      const t = on ? "Hide the reply's extras" : "Show the reply's extras";
+      b.title = t; b.setAttribute('aria-label', t);
+    };
+    function showExtras(on) {
+      on = !!(on && extras);
+      setBulb(bulb, on);
+      extrasCap.hidden = !on;
+      extrasCap.replaceChildren(...(on ? extrasParts(extras) : []));
+    }
+    // The headed parts of a reply's extras: the last reply's, or a past one's (logged with it).
+    function extrasParts(extras) {
+      const parts = [];
+      const add = (head, body) => parts.push(make('h4', '', head), body);
+      const pairs = (list) => {
+        const dl = make('dl');
+        list.forEach(([k, v, note]) => { const dd = make('dd', '', v); if (note) dd.append(make('small', '', note)); dl.append(make('dt', '', k), dd); });
+        return dl;
+      };
+      if (extras.thinking) add('Thinking', make('p', 'think', extras.thinking.trim()));
+      extras.tags.forEach((x) => add(x.name.replace(/[_-]+/g, ' ').replace(/^./, (c) => c.toUpperCase()), make('p', '', x.text || '(empty)')));
+      const m = extras.mood;
+      if (m && typeof m === 'object') {
+        const body = make('p');
+        body.append([m.mood, typeof m.energy === 'number' && `energy ${m.energy}`, m.pattern, m.voice && `${m.voice} voice`].filter(Boolean).join(' · '));
+        if (m.topic) body.append(make('br'), `Topic: ${m.topic}`);
+        const colors = (Array.isArray(m.palette) ? m.palette : []).map((c) => String(c).trim()).filter((c) => /^#?[0-9a-f]{3,8}$/i.test(c));
+        if (colors.length) {
+          body.append(make('br'));
+          colors.forEach((c) => { c = c.startsWith('#') ? c : `#${c}`; const sw = make('span', 'sw'); sw.style.background = c; body.append(sw, make('span', 'hex', c)); });
+        }
+        add('Mood', body);
+      } else if (m) add('Mood', make('p', '', m));
+      extras.calls.forEach((c) => {
+        const tool = c.tool || (c.params.file_path ? 'Read' : 'Tool call');
+        add(`${tool}, written in the reply (not run)`, pairs(Object.entries(c.params).map(([k, v]) => [k, v, PARAM_NOTES[k] && PARAM_NOTES[k](v, c.params)])));
+      });
+      if (extras.tools.length) add('Tools used', pairs(extras.tools.map((t) => [t.name, t.target || ''])));
+      if (extras.words.length) {
+        const p = make('p');
+        extras.words.forEach((w, i) => { const s = make('span', 'pick', w); s.addEventListener('click', () => addInput(w)); p.append(...(i ? [' · ', s] : [s])); });
+        add('Summary words', p);
+      }
+      return parts;
+    }
+    // A summary word, clicked: added to the end of the typing box, which opens with the cursor after it.
+    function addInput(t) {
+      form.classList.add('on');
+      input.value = input.value.trim() ? `${input.value.trimEnd()} ${t}` : t;
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    }
+    bulb.addEventListener('click', () => showExtras(bulb.getAttribute('aria-expanded') !== 'true'));
+    const importantText = $('.important-text'), dots = $('.dots'), menu = $('.menu');
+    // The Conversation box's ⋯ menu. Expand shows the last reply again once its captions have faded, and Shrink hides it
+    // (or a past conversation). Choose lists past conversations, newest first, under Show All.
+    const when = (at) => new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    const item = (text, fn, sub) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.setAttribute('role', 'menuitem'); b.textContent = text;
+      if (sub) { const sm = document.createElement('small'); sm.textContent = sub; b.appendChild(sm); }
+      if (fn) b.addEventListener('click', fn); else b.disabled = true;
+      return b;
+    };
+    // focus: its first item takes the focus, as when it's opened from the keyboard (a click's detail is 0).
+    const showMenu = (items, focus) => {
+      menu.replaceChildren(...(items || []));
+      menu.hidden = !items;
+      dots.setAttribute('aria-expanded', String(!!items));
+      if (items) menu.scrollTop = 0;
+      if (items && focus) { const first = items.find((b) => !b.disabled); if (first) first.focus(); }
+    };
+    // list: the conversations to show, oldest first; null closes the view.
+    const showPast = (list) => {
+      showMenu(null);
+      pastCap.hidden = !list;
+      if (!list) return pastCap.replaceChildren();
+      showReply(false, true);
+      pastCap.replaceChildren(...list.map((c) => {
+        const sec = document.createElement('section'), h = document.createElement('h4');
+        h.textContent = `${c.title || 'Conversation'} · ${when(c.at)}`;
+        sec.appendChild(h);
+        (c.turns || []).forEach((t) => {
+          const para = document.createElement('p');
+          if (t.who === 'you') { para.className = 'you'; para.textContent = `“${t.text}”`; } else para.textContent = t.text;
+          if (!t.x) return sec.appendChild(para);
+          // A reply with its extras: its own light bulb, which shows them above it and brings back its mood.
+          const reply = make('div', 'reply'), b = make('button', 'bulb'), box = make('div', 'extras');
+          b.type = 'button'; b.innerHTML = bulbSvg; setBulb(b, false); box.hidden = true;
+          b.addEventListener('click', () => {
+            const on = b.getAttribute('aria-expanded') !== 'true';
+            setBulb(b, on); box.hidden = !on;
+            box.replaceChildren(...(on ? extrasParts(t.x) : []));
+            if (on && t.x.mood && typeof t.x.mood === 'object') actions.mood(t.x.mood);
+          });
+          reply.append(b, box, para);
+          sec.appendChild(reply);
+        });
+        return sec;
+      }));
+      pastCap.scrollTop = list.length > 1 ? pastCap.scrollHeight : 0; // Show All opens at the latest
+    };
+    const expanded = () => !pastCap.hidden || (!claudeCap.hidden && claudeCap.style.opacity !== '0' && !!claudeText.textContent);
+    const expand = () => { showPast(null); claudeText.textContent = replyText; asideShown = false; bulb.hidden = !extras; clearTimeout(fadeTimer); showReply(true); };
+    const shrink = () => { showPast(null); showReply(false, true); };
+    // A chosen conversation's colors and motion: those of its last reply with a mood.
+    const lastMood = (c) => {
+      const m = (c.turns || []).map((t) => t.x && t.x.mood).filter((x) => x && typeof x === 'object').pop();
+      if (m) actions.mood(m);
+    };
+    const choose = (e) => {
+      const log = actions.log();
+      showMenu(log.length
+        ? [Object.assign(item('Show All', () => showPast(log.slice().reverse())), { className: 'all' }),
+          ...log.map((c) => item(c.title || 'Conversation', () => { showPast([c]); lastMood(c); }, when(c.at)))]
+        : [item('No past conversations yet')], !e.detail);
+    };
+    dots.addEventListener('click', (e) => showMenu(menu.hidden
+      ? [expanded() ? item('Shrink', shrink) : item('Expand', replyText ? expand : null), item('Choose', choose)]
+      : null, !e.detail));
+    // A click off the menu, or Escape, closes it. On window in the capture phase, like the settings panel's.
+    window.addEventListener('click', (e) => {
+      if (menu.hidden) return;
+      const path = e.composedPath();
+      if (!path.includes(menu) && !path.includes(dots)) showMenu(null);
+    }, true);
+    menu.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); showMenu(null); dots.focus(); } });
     return {
       setState(s, text) { wrap.dataset.s = s; label.textContent = text; },
       user(t) { userCap.textContent = t ? `“${t}”` : ''; },
-      /** aside: a line of the widget's own, such as the farewell, which the circle in the important box doesn't bring back.
-       *  It takes the reply's place at once, so the circle shows then to bring the reply back. */
-      claude(t, aside) { if (!aside) replyText = t; claudeCap.textContent = t; showReply(true); clearTimeout(fadeTimer); showMore(false, !aside || !replyText); },
-      important(t) { importantText.textContent = t; importantCap.hidden = !t; },
+      /** aside: a line of the widget's own, such as the farewell, which the menu's Expand doesn't bring back.
+       *  A new reply closes a past conversation shown from the menu. */
+      claude(t, aside) {
+        if (!aside) { replyText = t; if (!t) { extras = null; if (!pastCap.hidden) showPast(null); } }
+        asideShown = !!aside; bulb.hidden = asideShown || !extras;
+        if (asideShown) showExtras(false);
+        claudeText.textContent = t; showReply(true); clearTimeout(fadeTimer);
+      },
+      /** The finished reply's extras (replyExtras), for the light bulb. */
+      extras(x) { extras = x && (x.thinking || x.tags.length || x.mood || x.calls.length || x.tools.length || x.words.length) ? x : null; bulb.hidden = asideShown || !extras; },
+      important(t) { importantText.textContent = t; importantCap.hidden = !t && !importantCap.classList.contains('pinned'); if (!t) showMenu(null); },
       /** Status and errors, in a box of their own so a reply streaming into the captions can't overwrite them. */
       note(t, ms = 6000) {
         noticeCap.textContent = t; noticeCap.style.opacity = 1; clearTimeout(noteTimer);
         noteTimer = setTimeout(() => { noticeCap.style.opacity = 0; noteTimer = setTimeout(() => { noticeCap.textContent = ''; }, 600); }, ms);
       },
-      fade(ms = 8000) { clearTimeout(fadeTimer); fadeTimer = setTimeout(() => { showReply(false); userCap.textContent = ''; showMore(false, !replyText); }, ms); },
+      fade(ms = 8000) { clearTimeout(fadeTimer); fadeTimer = setTimeout(() => { showReply(false); userCap.textContent = ''; }, ms); },
       showInput(focus) { form.classList.add('on'); if (focus) input.focus(); },
+      addInput,
+      /** The typing box and the captions above the controls close (notes stay), as when a page's own panel opens
+       *  there. Claude keeps listening, and the next reply shows as usual. */
+      hideText() {
+        form.classList.remove('on'); showMenu(null); showPast(null); showReply(false, true); userCap.textContent = '';
+        if (!importantCap.classList.contains('pinned')) importantCap.hidden = true;
+      },
       askPassphrase() { passForm.classList.add('on'); passInput.focus(); },
       setVoices(list, selected) {
         const groups = [];
@@ -1128,7 +1459,7 @@
       },
       setVoiceMode(m) { modeSel.value = m; pick.hidden = m !== 'chosen'; },
       setVoiceInfo(m, name) { hint.textContent = VOICE_HINTS[m] + (name && m !== 'chosen' ? ` Now: ${name}.` : ''); },
-      /** Text Output: { conversation, important, words, sets } as booleans. noWords: the page turned the floating words off (data-words). */
+      /** Text Output: { conversation, important, align, words, sets } as booleans. noWords: the page turned the floating words off (data-words). */
       setTextOutput(o, noWords) {
         checks.forEach((c) => {
           c.checked = !!o[c.name];
@@ -1137,10 +1468,15 @@
         root.querySelector('[name="sets"]').disabled = !o.words; // word groups only show as Large Words
         wrap.classList.toggle('no-conversation', !o.conversation);
         wrap.classList.toggle('no-important', !o.important);
+        wrap.classList.toggle('align', !!o.align);
       },
       setPaused(audio, motion) {
         toggleLabel(audioBtn, audio, 'voice'); toggleLabel(motionBtn, motion, 'motion');
         const held = audio || motion, t = held ? 'Resume Claude' : 'Pause Claude';
+        // While paused, the Conversation box shows (even with Important Text off), so its ⋯ menu can be reached.
+        importantCap.classList.toggle('pinned', held);
+        importantCap.hidden = !held && !importantText.textContent;
+        if (!held) showMenu(null);
         ownPlay.setAttribute('aria-pressed', String(held)); ownPlay.title = t; ownPlay.setAttribute('aria-label', t);
         ownPlay.querySelector('path').setAttribute('d', held ? 'M8 5.5v13l10.5-6.5z' : 'M9 6v12M15 6v12');
       },
@@ -1149,6 +1485,9 @@
         agentName.textContent = name; agentStatus.textContent = status; agentUsage.textContent = usage;
         agentVia.textContent = ` ${via}`; agentMore.hidden = !via;
       },
+      /** The captions and panels showing now, as client rects, which large words behind them fade under. */
+      boxes: () => [...root.querySelectorAll('.cap, .panel.on, form.on')]
+        .filter((c) => c.getClientRects().length > 0 && c.style.opacity !== '0').map((c) => c.getBoundingClientRect()),
       get play() { return play; },
     };
   }
@@ -1192,6 +1531,8 @@
   let voiceBlockNoted = false; // a "voice was blocked" note shows once, until speech works again
 
   const ui = UI(host, {
+    log: readLog,
+    mood(m) { scene.applyMood(m); scene.pulse(0.35); },
     pill() {
       unlockAudio();
       if (mode === 'off') return start();
@@ -1245,6 +1586,7 @@
   const replying = () => mode === 'speaking' || mode === 'thinking';
   function setAudioPaused(p) {
     audioPaused = !!p;
+    if (audioPaused) speakQueue.filter((it) => it.showWords).forEach((it) => { wordField.sentence(it.text, null); it.showWords = false; }); // as in enqueueSpeech
     if (tts) { if (audioPaused) tts.pause(); else tts.resume(); }
     ui.setPaused(audioPaused, motionPaused); syncPlayButton();
   }
@@ -1503,9 +1845,9 @@
 
   // Text Output, also in the settings panel: which kinds of text show (data-text-output, then this browser's choices).
   // Important Text and Precise Word Sets each add rules to Claude's prompt (shared/voice-prompt.js), so they're asked for only when on.
-  const TEXT_KEY = 'claude-voice:text-output', TEXT_KINDS = ['conversation', 'important', 'words', 'sets'];
+  const TEXT_KEY = 'claude-voice:text-output', TEXT_KINDS = ['conversation', 'important', 'align', 'words', 'sets'];
   const textOut = (() => {
-    const on = ds.textOutput === undefined ? ['conversation', 'words', 'sets'] : ds.textOutput.toLowerCase().split(/[\s,]+/);
+    const on = ds.textOutput === undefined ? ['conversation', 'align', 'words', 'sets'] : ds.textOutput.toLowerCase().split(/[\s,]+/);
     return Object.fromEntries(TEXT_KINDS.map((k) => [k, on.includes(k)]));
   })();
   try {
@@ -1517,6 +1859,9 @@
     wordField.setEnabled(textOut.words);
   }
   applyTextOutput();
+
+  wordField.setCovers(ui.boxes);
+  wordField.setPick(ui.addInput);
 
   function englishVoices() { return tts ? rankVoices(tts.getVoices().filter((v) => /^en/i.test(v.lang || ''))) : []; }
 
@@ -1665,9 +2010,34 @@
     }
   }
 
+  // --- past conversations, for the Conversation box's menu: newest first, each with its title (the first thing said) and
+  // its turns as shown. Read again before each save, so other tabs' conversations are kept.
+  const LOG_KEY = 'claude-voice:conversations', LOG_MAX = 50;
+  let logged = null; // this conversation's entry, made at its first turn
+  function readLog() {
+    try { const l = JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); return Array.isArray(l) ? l.filter((c) => c && Array.isArray(c.turns)) : []; } catch (e) { return []; }
+  }
+  // x: a reply's extras (ui.extras), kept with it for its light bulb in the ⋯ menu's past conversations. Thinking is cut
+  // to its first THINK_KEEP characters, since it can run long and the browser keeps about 5 MB per site.
+  const THINK_KEEP = 2000;
+  function logTurn(who, text, x) {
+    if (!text) return;
+    if (!logged) logged = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, at: Date.now(), title: text.length > 70 ? `${text.slice(0, 68).replace(/\s+\S*$/, '')}…` : text, turns: [] };
+    const turn = { who, text };
+    if (x && (x.thinking || x.tags.length || x.mood || x.calls.length || x.tools.length || x.words.length)) {
+      turn.x = { ...x, thinking: x.thinking && x.thinking.length > THINK_KEEP ? `${x.thinking.slice(0, THINK_KEEP).replace(/\s+\S*$/, '')}…` : x.thinking };
+    }
+    logged.turns.push(turn);
+    const log = [logged, ...readLog().filter((c) => c.id !== logged.id)];
+    // When the browser's storage is full, the oldest go.
+    for (let n = Math.min(log.length, LOG_MAX); n > 0; n = Math.floor(n / 2)) {
+      try { localStorage.setItem(LOG_KEY, JSON.stringify(log.slice(0, n))); return; } catch (e) { /* full or blocked */ }
+    }
+  }
+
   // --- conversation
   function beginConversation(firstUtterance, typed) {
-    history = []; pending = ''; queuedTurn = '';
+    history = []; pending = ''; queuedTurn = ''; logged = null;
     if (voiceMode === 'random') rollVoice();
     scene.applyMood(MOODS.listening);
     scene.pulse(0.5);
@@ -1691,6 +2061,7 @@
     clearTimeout(sendTimer); pending = ''; queuedTurn = '';
     if (context && !history.length) history.push({ role: 'user', content: String(context) });
     history.push({ role: 'assistant', content: question });
+    logTurn('claude', question);
     ui.claude(question, true);
     streamDone = true;
     enqueueSpeech(question);
@@ -1720,6 +2091,7 @@
     if (isThanks(text)) return endConversation(true);
     ui.user(text);
     history.push({ role: 'user', content: text });
+    logTurn('you', text);
     if (history.length > cfg.maxHistory) history = history.slice(-cfg.maxHistory);
     askClaude();
   }
@@ -1757,8 +2129,19 @@
       const m = tailRaw.match(last ? /<important>([\s\S]*?)(?:<\/important>|<summary>|$)/ : /<important>([\s\S]*?)<\/important>/);
       if (m && m[1].trim()) { importantShown = true; ui.important(unmark(m[1]).trim()); }
     };
-    const feedBody = (chunk) => {
+    let bodyLead = ''; // the body's start, held until it's past any tag of the agent's own (dropLeadTags); null after
+    let strayHeld = ''; // tool-call markup still arriving (stripStray)
+    const calls = [], toolList = [];
+    let thinking = '';
+    const feedBody = (chunk, final) => {
+      if (bodyLead !== null) {
+        const rest = dropLeadTags(bodyLead + chunk);
+        if (!rest) { bodyLead = rest === null ? bodyLead + chunk : ''; return; }
+        bodyLead = null; chunk = rest;
+      }
       if (tailRaw !== null) { tailRaw += chunk; return showImportant(); }
+      const st = stripStray(strayHeld + chunk, calls, final);
+      strayHeld = st.rest; chunk = st.out;
       let s = held + chunk; held = '';
       const at = Math.min(...TAGS.map((t) => { const i = s.indexOf(t); return i < 0 ? Infinity : i; }));
       if (at < Infinity) { tailRaw = s.slice(at); s = s.slice(0, at); showImportant(); }
@@ -1768,7 +2151,8 @@
     const take = (chunk) => {
       raw += chunk;
       if (moodDone) return feedBody(chunk);
-      const head = raw.trimStart();
+      const head = dropLeadTags(raw);
+      if (head === null) return;
       if (head.length >= 6 && !head.startsWith('<mood')) { moodDone = true; voiceForReply(); return feedBody(head); }
       const end = head.indexOf('</mood>');
       if (end >= 0) {
@@ -1817,19 +2201,27 @@
           else if (evt.t === 'error') throw Object.assign(new Error(evt.v), { keys: !!evt.keys }); // keys: the site's keys all failed
           else if (evt.t === 'note') ui.note(evt.v, 15000); // e.g. why Gemini is answering instead of Claude
           else if (evt.t === 'agent') { agent = evt.v; showAgent(); }
-          else if (evt.t === 'tool') { thisRun.tools++; thisRun.activity = `${evt.v.name} ${evt.v.target || ''}`.trim(); showAgent(); }
+          else if (evt.t === 'thinking') thinking += evt.v;
+          else if (evt.t === 'tool') { toolList.push(evt.v); thisRun.tools++; thisRun.activity = `${evt.v.name} ${evt.v.target || ''}`.trim(); showAgent(); }
           else if (evt.t === 'usage') { thisRun.usage = evt.v; showAgent(); }
         }
       }
       if (!moodDone && raw) { moodDone = true; voiceForReply(); feedBody(raw.trimStart()); }
+      if (bodyLead) { const rest = bodyLead; bodyLead = null; feedBody(rest); } // a tag that never closed: shown as it came
+      if (strayHeld) feedBody('', true);
       if (held) { feedSpeech(held); held = ''; }
       showImportant(true);
       const sum = tailRaw && tailRaw.match(/<summary>([\s\S]*)/);
-      wordField.summary(parseSummary(sum && sum[1]));
+      const words = parseSummary(sum && sum[1]);
+      wordField.summary(words);
+      const x = { ...replyExtras(raw), thinking, calls, tools: toolList, words: words || [] };
+      ui.extras(x);
       const tail = forSpeech(sentenceBuf); sentenceBuf = '';
       if (tail) enqueueSpeech(tail, null, true);
-      if (raw.trim()) history.push({ role: 'assistant', content: raw.trim() });
-      emit('reply', { text: unmark(forSpeech(spokenText)) });
+      if (raw.trim()) history.push({ role: 'assistant', content: (dropLeadTags(raw) || raw).trim() }); // so Claude doesn't see its stray tag and repeat it
+      const said = unmark(forSpeech(spokenText));
+      logTurn('claude', said, x);
+      emit('reply', { text: said });
       endRun(thisRun, 'done');
       passJustTraded = false;
     } catch (err) {
@@ -1944,7 +2336,9 @@
   showAgent();
 
   // --- text to speech (own queue so we can pulse visuals, interrupt, and recover from stuck engines)
+  // While Claude's voice is paused, a reply's sentences wait to be spoken, but their large words show as they arrive.
   function enqueueSpeech(text, onDone, showWords) {
+    if (showWords && audioPaused) { wordField.sentence(text, null); showWords = false; }
     speakQueue.push({ text, onDone, showWords });
     if (!speaking) speakNext();
   }
@@ -2042,6 +2436,8 @@
     ask: (question, context) => askAloud(question, context),
     /** Show the typing box and put the cursor in it, for an answer typed rather than spoken. */
     focusInput: () => ui.showInput(true),
+    /** Closes the typing box and the captions, such as for a page's panel opening where they show. */
+    hideText: () => ui.hideText(),
     /** Whether this browser can hear speech (not Brave, which turns the service off, and not one without it). */
     get canListen() { return !!SR; },
     say(text) { if (mode === 'off' || mode === 'wake' || mode === 'error') { const m = text.match(WAKE_RE); if (m) return beginConversation(text.slice(m.index + m[0].length).trim()); return beginConversation(text, true); } if (mode === 'speaking' || mode === 'thinking') interrupt(); handleUtterance(text); },

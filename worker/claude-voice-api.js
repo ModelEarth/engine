@@ -111,7 +111,7 @@ export async function handleClaudeVoice(request, env, ctx, { passphrase: require
   const toolkit = team ? tools(env, { origin: new URL(request.url).origin, page }) : null;
   const claude = (apiKey) => ({ name: 'Claude', model: env.CLAUDE_MODEL || DEFAULT_MODEL, files: toolkit?.label,
     stream: (o) => streamClaude({ ...o, apiKey, model: env.CLAUDE_MODEL || DEFAULT_MODEL, system: toolkit ? system + toolkit.prompt : system,
-      tools: toolkit, onTool: (tool) => send({ t: 'tool', v: tool }) }) });
+      tools: toolkit, onTool: (tool) => send({ t: 'tool', v: tool }), onThinking: (v) => send({ t: 'thinking', v }) }) });
   const providers = own
     ? [own.name === 'Claude' ? claude(ownKey) : own.name === 'Gemini' ? gemini(ownKey) : openaiStyle(own, ownKey)]
     : [env.ANTHROPIC_API_KEY && claude(env.ANTHROPIC_API_KEY), env.GEMINI_API_KEY && gemini(env.GEMINI_API_KEY)].filter(Boolean);

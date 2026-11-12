@@ -9,14 +9,15 @@ import { ProviderError, providerError } from './provider-error.js';
 // tools, if given, are Claude's own tools for this reply: { definitions, run(name, input) -> Promise<string>,
 // target(name, input) -> string }. Claude may call them several times (up to maxRounds) before it finishes; onTool
 // gets { name, target } as each one starts. Without tools, the reply is one request, as before.
-export async function streamClaude({ apiKey, model, system = SYSTEM_PROMPT, messages, maxTokens, signal, onText, onUsage, tools, onTool, maxRounds = 12 }) {
+// onThinking, if given, gets Claude's thinking as it streams, when the model thinks.
+export async function streamClaude({ apiKey, model, system = SYSTEM_PROMPT, messages, maxTokens, signal, onText, onUsage, tools, onTool, onThinking, maxRounds = 12 }) {
   const convo = [...messages];
   const total = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
   let spoke = false, reply = null;
   for (let round = 1; ; round++) {
     const last = round > maxRounds; // out of rounds: answer from what's been found, with no more tool calls
     reply = await streamOnce({
-      apiKey, model, system, messages: convo, signal,
+      apiKey, model, system, messages: convo, signal, onThinking,
       maxTokens: maxTokens || (tools ? 16000 : 700),
       tools: tools && tools.definitions, noMoreTools: last,
       // Claude may speak, use tools, then speak again: a line break keeps the sentences either side apart.
@@ -46,7 +47,7 @@ export async function streamClaude({ apiKey, model, system = SYSTEM_PROMPT, mess
 // One request, streamed. Gives setReply the reply as it builds: { content (the blocks, to send back with tool
 // results), stop (stop_reason), usage, fresh (true until this request's first text), invalid (tool call id -> its
 // input, when that isn't JSON) }.
-async function streamOnce({ apiKey, model, system, messages, maxTokens, signal, onText, tools, noMoreTools }, setReply) {
+async function streamOnce({ apiKey, model, system, messages, maxTokens, signal, onText, onThinking, tools, noMoreTools }, setReply) {
   const reply = { content: [], stop: null, usage: {}, fresh: true, invalid: new Map() };
   setReply(reply);
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -89,7 +90,7 @@ async function streamOnce({ apiKey, model, system, messages, maxTokens, signal, 
       } else if (evt.type === 'content_block_delta' && block) {
         const d = evt.delta;
         if (d.type === 'text_delta') { block.text = (block.text || '') + d.text; onText(d.text); }
-        else if (d.type === 'thinking_delta') block.thinking = (block.thinking || '') + d.thinking;
+        else if (d.type === 'thinking_delta') { block.thinking = (block.thinking || '') + d.thinking; if (onThinking) onThinking(d.thinking); }
         else if (d.type === 'signature_delta') block.signature = (block.signature || '') + d.signature;
         else if (d.type === 'input_json_delta') block.json += d.partial_json;
       } else if (evt.type === 'content_block_stop' && block?.type === 'tool_use') {
