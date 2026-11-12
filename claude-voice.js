@@ -32,6 +32,8 @@
  *   data-words-replace CSS selector of content to fade out while keywords show (default: the target's own content,
  *                      except elements marked data-words-stay, such as a scene picture behind the words).
  *                      An element with data-words-dim="0.7" fades only to that opacity instead, staying in view and clickable.
+ *                      Words keep clear of the target's own controls (positioned, with a z-index above 1) and of elements
+ *                      anywhere on the page marked data-words-avoid.
  *   data-words-unless  CSS selector of displays that keep the floating words away: while one is visible as a reply starts,
  *                      that reply shows no words and leaves the page's content as it is (localsite: the Earth map)
  *   data-text-output   the ⚙ panel's Text Output choices that start on, separated by spaces or commas: conversation
@@ -50,7 +52,7 @@
  * the note says it can be added there, and the Large Words ask for one, with a "Set My Keys" button that opens the
  * /keys page's list of keys on this page (keys/key-manager.js, loaded then). edit=keys in the page's hash (edit can list
  * several, comma-separated) opens that list too, and the Keys button in the settings panel's Agent section adds it.
- * API: window.ClaudeVoice.{start, stop, say, end, interrupt, setMood, clearWords, pauseAudio, pauseMotion, openKeys, on}
+ * API: window.ClaudeVoice.{start, stop, say, ask, focusInput, end, interrupt, setMood, clearWords, pauseAudio, pauseMotion, openKeys, on}
  */
 (function () {
   'use strict';
@@ -647,16 +649,18 @@
     const overlap = (a, b) => a.x - PAD < b.x + b.w && b.x < a.x + a.w + PAD && a.y - PAD < b.y + b.h && b.y < a.y + a.h + PAD;
     // Controls laid over the target, such as a map's buttons and panels and this widget's own captions: positioned, with
     // a z-index above the words. Words keep clear of them. Found again as each word is placed, since captions and notes
-    // grow; anything covering most of the target is a container rather than a control, so it doesn't count.
+    // grow; anything covering most of the target is a container rather than a control, so it doesn't count. Elements
+    // anywhere on the page marked data-words-avoid, such as a page's own control over the target, count too.
     let obstacles = [];
     function findObstacles() {
       if (host === document.body) return [];
       const L = layer.getBoundingClientRect();
+      const marked = [...document.querySelectorAll('[data-words-avoid]')].filter((el) => !host.contains(el) && getComputedStyle(el).visibility !== 'hidden');
       return [...host.querySelectorAll('*')].filter((el) => {
         if (el === layer) return false;
         const cs = getComputedStyle(el);
         return cs.position !== 'static' && parseInt(cs.zIndex, 10) > 1 && cs.visibility !== 'hidden';
-      }).map((el) => el.getBoundingClientRect())
+      }).concat(marked).map((el) => el.getBoundingClientRect())
         .filter((r) => r.width > 0 && r.height > 0 && r.width * r.height < L.width * L.height * 0.4)
         .map((r) => ({ x: r.left - L.left, y: r.top - L.top, w: r.width, h: r.height }));
     }
@@ -1108,7 +1112,7 @@
         noteTimer = setTimeout(() => { noticeCap.style.opacity = 0; noteTimer = setTimeout(() => { noticeCap.textContent = ''; }, 600); }, ms);
       },
       fade(ms = 8000) { clearTimeout(fadeTimer); fadeTimer = setTimeout(() => { showReply(false); userCap.textContent = ''; showMore(false, !replyText); }, ms); },
-      showInput() { form.classList.add('on'); },
+      showInput(focus) { form.classList.add('on'); if (focus) input.focus(); },
       askPassphrase() { passForm.classList.add('on'); passInput.focus(); },
       setVoices(list, selected) {
         const groups = [];
@@ -1674,6 +1678,24 @@
     else if (!typed) ui.note('I’m listening.', 3000);
   }
 
+  // A page's question, such as from a prompt on screen: Claude says it, then listens for the answer, which goes to Claude
+  // with the question before it. context, when given, is sent first as the person's own framing for a new conversation,
+  // since the conversation has to start with them (sanitizeMessages, shared/voice-prompt.js).
+  async function askAloud(question, context) {
+    question = String(question || '').trim();
+    if (!question) return;
+    unlockAudio();
+    if (mode === 'off' || mode === 'error') await start();
+    if (mode === 'speaking' || mode === 'thinking') interrupt();
+    if (mode !== 'listening') beginConversation('', true);
+    clearTimeout(sendTimer); pending = ''; queuedTurn = '';
+    if (context && !history.length) history.push({ role: 'user', content: String(context) });
+    history.push({ role: 'assistant', content: question });
+    ui.claude(question, true);
+    streamDone = true;
+    enqueueSpeech(question);
+  }
+
   function endConversation(sayGoodbye) {
     clearTimeout(sendTimer); clearTimeout(idleTimer);
     if (abortCtl) abortCtl.abort();
@@ -2016,6 +2038,12 @@
     openKeys: () => setMyKeys(),
     end: () => endConversation(true),
     /** Feed text as if it were spoken (useful for testing and for custom inputs). */
+    /** Claude asks this question aloud, then listens for the answer. context: optional framing sent first in a new conversation. */
+    ask: (question, context) => askAloud(question, context),
+    /** Show the typing box and put the cursor in it, for an answer typed rather than spoken. */
+    focusInput: () => ui.showInput(true),
+    /** Whether this browser can hear speech (not Brave, which turns the service off, and not one without it). */
+    get canListen() { return !!SR; },
     say(text) { if (mode === 'off' || mode === 'wake' || mode === 'error') { const m = text.match(WAKE_RE); if (m) return beginConversation(text.slice(m.index + m[0].length).trim()); return beginConversation(text, true); } if (mode === 'speaking' || mode === 'thinking') interrupt(); handleUtterance(text); },
     setMood: (m) => scene.applyMood(typeof m === 'string' ? MOODS[m] || { mood: m } : m),
     on(type, fn) { (listeners[type] = listeners[type] || []).push(fn); return () => { listeners[type] = listeners[type].filter((f) => f !== fn); }; },
