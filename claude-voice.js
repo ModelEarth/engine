@@ -1120,11 +1120,13 @@
         /* The page's play button (data-play-button), or this widget's own when the page has none, at the row's right end, in a pill that grows upward over the
            captions on hover, showing the Audio and Motion toggles above it. A paused toggle turns grey. */
         .ctl { position: relative; width: 38px; height: 38px; flex: none; }
-        .ctl-pill { position: absolute; left: 0; bottom: 0; width: 38px; display: flex; flex-direction: column; border-radius: 19px; overflow: hidden;
+        .ctl-pill { position: absolute; right: 0; bottom: 0; width: 38px; display: flex; flex-direction: column; align-items: flex-end; border-radius: 19px; overflow: hidden; transition: width .2s ease;
                     background: rgba(10,12,20,.5); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,.16); }
-        .more { display: flex; flex-direction: column; max-height: 0; overflow: hidden; transition: max-height .2s ease; }
-        .ctl:hover .more, .ctl:focus-within .more { max-height: 72px; }
-        .row .ctl-pill .kb { width: 36px; height: 36px; flex: none; border: 0; border-radius: 50%; background: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+        .more { display: flex; flex-direction: column; align-items: flex-end; max-height: 0; overflow: hidden; transition: max-height .2s ease; width: 100%; }
+        .ctl:hover .more, .ctl:focus-within .more { max-height: 76px; }
+        .ctl:hover .ctl-pill, .ctl:focus-within .ctl-pill { width: 112px; }
+        .row .ctl-pill .kb { box-sizing: border-box; width: 100%; height: 36px; flex: none; border: 0; border-radius: 18px; background: none; backdrop-filter: none; -webkit-backdrop-filter: none; display: flex; align-items: center; justify-content: space-between; padding: 0 10px 0 12px; gap: 8px; white-space: nowrap; }
+        .row .ctl-pill .ctl-label { font-size: 12px; font-weight: 500; letter-spacing: .02em; opacity: .9; white-space: nowrap; color: #f4f6fb; }
         .ctl-pill .kb:hover, ::slotted([slot="play"]:hover) { background: rgba(255,255,255,.12); }
         .ctl-pill .kb:focus-visible { outline-offset: -2px; }
         .ctl-pill .kb[aria-pressed="true"] { color: #7d8597; }
@@ -1180,10 +1182,12 @@
           <button class="pill" type="button"><span class="dot"></span><span class="label">Enable voice</span></button>
           <div class="ctl"><div class="ctl-pill">
             <div class="more">
-              <button class="kb audio" type="button" title="Pause Claude's voice" aria-label="Pause Claude's voice" aria-pressed="false">
+              <button class="kb audio" type="button" title="Pause voice" aria-label="Pause voice" aria-pressed="false">
+                <span class="ctl-label">Audio</span>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>
               </button>
-              <button class="kb motion" type="button" title="Pause Claude's motion" aria-label="Pause Claude's motion" aria-pressed="false">
+              <button class="kb motion" type="button" title="Pause motion" aria-label="Pause motion" aria-pressed="false">
+                <span class="ctl-label">Motion</span>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="15.5" cy="12" r="5.5"/><path d="M2 8.5h5M3.5 12H7M2 15.5h5"/></svg>
               </button>
             </div>
@@ -1259,7 +1263,7 @@
       ctl.addEventListener('focusout', (e) => { focus = inside(e.relatedTarget); set(); });
     }
     const toggleLabel = (btn, paused, what) => {
-      const t = `${paused ? 'Resume' : 'Pause'} Claude's ${what}`;
+      const t = `${paused ? 'Resume' : 'Pause'} ${what}`;
       btn.setAttribute('aria-pressed', String(paused)); btn.title = t; btn.setAttribute('aria-label', t);
     };
     let fadeTimer, noteTimer;
@@ -1493,9 +1497,9 @@
   }
 
   // ------------------------------------------------------------------ phrases
-  const CLAUDE_WORD = '(?:claude|claud|clawed|cloud|clode|clyde|klaud|cloudy|claudia)';
-  const WAKE_RE = new RegExp(`\\b(?:ok(?:ay)?|o\\.?\\s?k\\.?)[\\s,.!]+${CLAUDE_WORD}\\b[\\s,.!?:]*`, 'i');
-  const THANKS_RE = new RegExp(`(?:^|\\b)(?:thanks|thank\\s+you|thank\\s+u|thx|cheers)(?:\\s+(?:so\\s+much|very\\s+much|a\\s+lot|again|${CLAUDE_WORD}))*[\\s.!,]*$`, 'i');
+  const AGENT_NAME = '(?:claude|claud|clawed|cloud|clode|clyde|klaud|cloudy|claudia|georgia|sade|sha[\\s-]?day|shaa[\\s-]?day|izzy|izzie|sparrow|little\\s+bird|senara|senera)';
+  const WAKE_RE = new RegExp(`\\b(?:ok(?:ay)?|o\\.?\\s?k\\.?)[\\s,.!]+${AGENT_NAME}\\b[\\s,.!?:]*`, 'i');
+  const THANKS_RE = new RegExp(`(?:^|\\b)(?:thanks|thank\\s+you|thank\\s+u|thx|cheers)(?:\\s+(?:so\\s+much|very\\s+much|a\\s+lot|again|${AGENT_NAME}))*[\\s.!,]*$`, 'i');
   const FAREWELLS = ["You're welcome.", 'Any time.', 'Happy to help.', 'My pleasure.'];
   function isThanks(text) {
     const m = text.match(THANKS_RE);
