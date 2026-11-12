@@ -1530,6 +1530,9 @@
   let rec = null, wantListening = false, recRunning = false, restartDelay = 250, networkErrors = 0;
   let mode = 'off';            // off | wake | listening | thinking | speaking
   let history = [], pending = '', sendTimer = null, idleTimer = null, abortCtl = null, queuedTurn = '';
+  // Only the start of a reply is spoken (SPOKEN_SENTENCES, or fewer once SPOKEN_WORDS is passed); the screen shows all of it, and the rest waits in unspoken.
+  const SPOKEN_SENTENCES = 2, SPOKEN_WORDS = 40;
+  let unspoken = [], spokenN = 0, spokenW = 0;
   let speakQueue = [], speaking = null, streamDone = true, ttsUnlocked = false, voice = null, currentSentence = '';
   let audioPaused = false, motionPaused = false;
   let voiceBlockNoted = false; // a "voice was blocked" note shows once, until speech works again
@@ -1540,7 +1543,7 @@
     pill() {
       unlockAudio();
       if (mode === 'off') return start();
-      if (mode === 'speaking' || mode === 'thinking') return interrupt();
+      if (mode === 'speaking' || mode === 'thinking') return holdReply();
       if (mode === 'listening') return endConversation(false);
       if (mode === 'wake') return beginConversation('');
     },
@@ -1577,8 +1580,15 @@
     },
   });
 
+  // The mic hears Claude through the speakers, so it's switched off while Claude speaks and back on just after (the tail of the echo). Tap or Escape interrupts.
+  let micHeld = false, micTimer;
+  function micHold(on) {
+    clearTimeout(micTimer);
+    if (on) { micHeld = true; if (rec && recRunning) try { rec.abort(); } catch (e) { /* ignore */ } }
+    else if (micHeld) micTimer = setTimeout(() => { micHeld = false; if (wantListening && !recRunning) try { rec.start(); } catch (e) { /* already starting */ } }, 700);
+  }
   function setMode(m) {
-    mode = m;
+    mode = m; micHold(m === 'speaking');
     const labels = { off: 'Enable voice', wake: SR ? 'Say “Ok Claude”' : 'Type to start', listening: 'Listening… say “Thanks” to finish', thinking: 'Thinking…', speaking: 'Speaking… tap to interrupt', error: 'Voice unavailable' };
     ui.setState(m, labels[m] || m);
     scene.setActivity(m === 'wake' ? 'idle' : m === 'off' ? 'off' : m);
@@ -1942,7 +1952,7 @@
       };
       rec.onend = () => {
         recRunning = false;
-        if (wantListening) setTimeout(() => { if (wantListening && !recRunning) { try { rec.start(); } catch (e) { /* already starting */ } } }, restartDelay);
+        if (wantListening && !micHeld) setTimeout(() => { if (wantListening && !recRunning && !micHeld) { try { rec.start(); } catch (e) { /* already starting */ } } }, restartDelay);
       };
     }
     try { rec.start(); } catch (e) { /* already running */ }
@@ -2093,6 +2103,7 @@
     text = text.trim();
     if (!text) return;
     if (isThanks(text)) return endConversation(true);
+    if (unspoken.length && CONTINUE_RE.test(text)) { ui.user(text); return speakRest(); }
     ui.user(text);
     history.push({ role: 'user', content: text });
     logTurn('you', text);
@@ -2106,7 +2117,7 @@
     abortCtl = new AbortController();
     const ctl = abortCtl;
     let raw = '', spokenText = '', moodDone = false, sentenceBuf = '';
-    streamDone = false;
+    streamDone = false; unspoken = []; spokenN = 0; spokenW = 0;
     ui.claude(''); ui.important('');
     wordField.begin();
     // "Change for response": pick this reply's voice once the mood header is in, before the first sentence is spoken.
@@ -2342,6 +2353,11 @@
   // --- text to speech (own queue so we can pulse visuals, interrupt, and recover from stuck engines)
   // While Claude's voice is paused, a reply's sentences wait to be spoken, but their large words show as they arrive.
   function enqueueSpeech(text, onDone, showWords) {
+    if (showWords) { // a sentence of Claude's reply
+      const w = unmark(text).split(/\s+/).length;
+      if (spokenN >= SPOKEN_SENTENCES || (spokenN && spokenW + w > SPOKEN_WORDS)) { unspoken.push(text); wordField.sentence(text, null); return; }
+      spokenN++; spokenW += w;
+    }
     if (showWords && audioPaused) { wordField.sentence(text, null); showWords = false; }
     speakQueue.push({ text, onDone, showWords });
     if (!speaking) speakNext();
@@ -2388,7 +2404,19 @@
     if (mode !== 'speaking' && mode !== 'thinking') return;
     setMode('listening');
     resetIdle();
+    if (unspoken.length) ui.note('Say “continue” to hear more.', 6000);
     if (queuedTurn) { const t = queuedTurn; queuedTurn = ''; handleUtterance(t); }
+  }
+  // "Continue" (or go on, the rest, more) speaks the next of what wasn't said, briefly and with no call to Claude. With nothing left it goes to Claude as usual.
+  const CONTINUE_RE = /^\s*(?:[a-z']{1,6}[\s,]+){0,2}(?:contin\w*|conversation|go on|go ahead|keep going|carry on|resume|next|yes|yeah|yep|sure|ok(?:ay)?|please|the rest|more|(?:tell me|say) (?:the rest|more))[\s.!]*$/i;
+  function speakRest() {
+    const rest = unspoken; unspoken = []; spokenN = 0; spokenW = 0;
+    rest.forEach((t) => enqueueSpeech(t, null, true)); // the same limits apply, so what's still over goes back to unspoken
+  }
+  function holdReply() {
+    unspoken = [speaking, ...speakQueue].filter((it) => it && it.showWords).map((it) => it.text).concat(unspoken);
+    interrupt();
+    if (unspoken.length) ui.note('Paused. Say “continue” to hear the rest.', 5000);
   }
   function interrupt() {
     if (abortCtl) { abortCtl.abort(); stoppingRun(); }
@@ -2399,7 +2427,7 @@
     if (s && s.onDone) return s.onDone();
     if (mode === 'speaking' || mode === 'thinking') { setMode('listening'); resetIdle(); }
   }
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && (mode === 'speaking' || mode === 'thinking')) interrupt(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && (mode === 'speaking' || mode === 'thinking')) holdReply(); });
 
   // --- lifecycle
   async function start() {
