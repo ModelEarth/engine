@@ -1127,7 +1127,12 @@
         .ctl:hover .ctl-pill, .ctl:focus-within .ctl-pill { width: 112px; }
         .row .ctl-pill .kb { box-sizing: border-box; width: 100%; height: 36px; flex: none; border: 0; border-radius: 18px; background: none; backdrop-filter: none; -webkit-backdrop-filter: none; display: flex; align-items: center; justify-content: space-between; padding: 0 10px 0 12px; gap: 8px; white-space: nowrap; }
         .row .ctl-pill .ctl-label { font-size: 12px; font-weight: 500; letter-spacing: .02em; opacity: .9; white-space: nowrap; color: #f4f6fb; }
-        .ctl-pill .kb:hover, ::slotted([slot="play"]:hover) { background: rgba(255,255,255,.12); }
+        /* The play button's row: a Play label, shrunk to nothing while the pill is closed, then the button. Hovering the row highlights it like the rows above. */
+        .play-row { display: flex; align-items: center; width: 100%; height: 36px; border-radius: 18px; }
+        .play-label { flex: 1 1 0; min-width: 0; overflow: hidden; cursor: pointer; }
+        .play-label .ctl-label { display: block; margin-left: 12px; }
+        .row .ctl-pill .play-row .kb { width: 36px; padding: 0; justify-content: center; }
+        .ctl-pill .more .kb:hover, .play-row:hover { background: rgba(255,255,255,.12); }
         .ctl-pill .kb:focus-visible { outline-offset: -2px; }
         .ctl-pill .kb[aria-pressed="true"] { color: #7d8597; }
         .ctl-pill .playPauseButton[aria-pressed="true"] { color: #f4f6fb; }
@@ -1191,9 +1196,12 @@
                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="15.5" cy="12" r="5.5"/><path d="M2 8.5h5M3.5 12H7M2 15.5h5"/></svg>
               </button>
             </div>
-            <slot name="play"><button class="kb playPauseButton" type="button" title="Pause Claude" aria-label="Pause Claude" aria-pressed="false">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6v12M15 6v12"/></svg>
-            </button></slot>
+            <div class="play-row">
+              <span class="play-label" aria-hidden="true"><span class="ctl-label">Play</span></span>
+              <slot name="play"><button class="kb playPauseButton" type="button" title="Pause Claude" aria-label="Pause Claude" aria-pressed="false">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6v12M15 6v12"/></svg>
+              </button></slot>
+            </div>
           </div></div>
         </div>
       </div>`;
@@ -1244,6 +1252,8 @@
     audioBtn.addEventListener('click', actions.audio);
     motionBtn.addEventListener('click', actions.motion);
     ownPlay.addEventListener('click', actions.hold);
+    // The Play label presses the slotted play button: the page's (data-play-button), or this widget's own
+    $('.play-label').addEventListener('click', () => ($('slot[name="play"]').assignedElements()[0] || ownPlay).click());
     const agentName = $('.agent-name'), agentVia = $('.agent-via'), agentStatus = $('.agent-status'), agentUsage = $('.agent-usage'), agentMore = $('.agent-more');
     agentMore.addEventListener('click', () => { agentVia.hidden = !agentVia.hidden; agentMore.setAttribute('aria-expanded', String(!agentVia.hidden)); });
     // data-open on the controls while anything shows above their row, for the page's own CSS (see the header)
@@ -2099,6 +2109,86 @@
     idleTimer = setTimeout(() => { if (mode === 'listening') { ui.note('Conversation ended after a quiet spell. Say “Ok Claude” to start again.', 6000); endConversation(false); } }, cfg.idleTimeout);
   }
 
+  // --- Places: a request naming a US state, a country or a county goes into the page's hash with localsite's goHash(),
+  // so the page shows it, and Claude (sent the page's hash) answers about it. States and countries are 2-character codes,
+  // and a county is geo=US plus its 5-digit FIPS, e.g. #state=AK&geo=US02290. The names come from localsite's location
+  // filter files and its getState(). Pages without localsite are left as they are.
+  const PLACE_ASK_RE = /\b(show|go|switch|change|set|select|choose|pick|open|view|display|zoom|jump|move|take me|navigate|load|use|look at|focus|filter|try|what about|how about|let'?s see)\b/i;
+  const COUNTY_WORDS = ['county', 'parish', 'borough', 'census area', 'city and borough', 'municipality', 'planning region', 'city'];
+  // Lowercase words with a space at each end, so ` ${name} ` only matches whole words ("india" isn't in "indiana").
+  const plainWords = (s) => ` ${String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+    .replace(/\[[^\]]*\]/g, ' ').replace(/['’]/g, '').replace(/[^a-z0-9]+/g, ' ').replace(/\bsaint\b/g, 'st').trim()} `;
+  const PLACE_ALIASES = [['state', 'DC', 'washington dc'], ['state', 'DC', 'washington d c'], ['country', 'US', 'usa'],
+    ['country', 'US', 'united states of america'], ['country', 'GB', 'uk'],
+    ['country', 'GB', 'britain'], ['country', 'GB', 'great britain'], ['country', 'GB', 'england']];
+  let placeData = null;
+  function loadPlaces() {
+    const file = (name) => fetch(localsitePath(`info/data/map-filters/${name}`)).then((r) => (r.ok ? r.text() : '')).catch(() => '');
+    const rows = (csv) => csv.trim().split(/\r?\n/).slice(1).map((line) => line.split(','));
+    placeData = placeData || Promise.all([file('us-counties.csv'), file('countries.csv')]).then(([counties, countries]) => {
+      const states = {}, countyList = [], places = [];
+      rows(counties).forEach(([st, fips, name]) => {
+        if (!/^\d{5}$/.test(fips || '')) return;
+        if (!states[st]) { states[st] = true; const n = getState(st); if (n) places.push({ kind: 'state', code: st, key: plainWords(n) }); }
+        const key = plainWords(name);
+        const suffix = COUNTY_WORDS.find((w) => key.endsWith(` ${w} `));
+        countyList.push({ st, fips, key, base: suffix ? key.slice(0, -suffix.length - 1) : key });
+      });
+      rows(countries).forEach(([code, name]) => { if (/^[A-Z]{2}$/.test(code) && name) places.push({ kind: 'country', code, key: plainWords(name) }); });
+      PLACE_ALIASES.forEach(([kind, code, name]) => places.push({ kind, code, key: plainWords(name) }));
+      places.sort((a, b) => b.key.length - a.key.length);
+      countyList.sort((a, b) => b.base.length - a.base.length || a.fips.localeCompare(b.fips));
+      return { places, countyList };
+    });
+    return placeData;
+  }
+  // The place a request names: { state }, { country } or { state, geo }, or null.
+  function findPlace(text, { places, countyList }) {
+    let t = plainWords(text);
+    const countyAfter = (i) => COUNTY_WORDS.some((w) => t.startsWith(` ${w} `, i - 1));
+    // A state's name that's followed by "county" is a county's name (Iowa County, Iowa), so it's passed over.
+    const at = (key) => { for (let i = t.indexOf(key); i >= 0; i = t.indexOf(key, i + 1)) if (!countyAfter(i + key.length)) return i; return -1; };
+    const wantsCountry = / (country|nation) /.test(t);
+    const pick = (kind) => places.find((p) => p.kind === kind && at(p.key) >= 0);
+    let found = wantsCountry ? pick('country') || pick('state') : pick('state') || pick('country');
+    if (found) { const i = at(found.key); t = t.slice(0, i) + ' | ' + t.slice(i + found.key.length); } // so a county doesn't match it again
+    // Counties: their name with "county" (or parish, borough...) after it, or a name of two or more words, such as Yukon Koyukuk.
+    const said = (c) => COUNTY_WORDS.some((w) => t.includes(`${c.base}${w} `)) || (c.base.trim().includes(' ') && t.includes(c.base));
+    const cityWanted = / city /.test(t);
+    const matchIn = (list) => {
+      const hits = list.filter(said);
+      if (!hits.length) return null;
+      const same = hits.filter((c) => c.st === hits[0].st && c.base === hits[0].base); // Baltimore County and Baltimore city
+      return (cityWanted && same.find((c) => c.fips.slice(2) >= '500')) || same[0];
+    };
+    const hashState = (getHash().state || '').split(',')[0].toUpperCase();
+    const inState = found && found.kind === 'state' ? found.code : (!found ? hashState : '');
+    let county = inState ? matchIn(countyList.filter((c) => c.st === inState)) : null;
+    if (!county && !found) {
+      // No state named or matching: a county name that's in only one state, or only one with the word said after it
+      // (Orleans Parish, not Orleans County in New York or Vermont)
+      const hits = countyList.filter(said);
+      const exact = hits.filter((c) => c.key !== c.base && t.includes(c.key));
+      const pool = exact.length ? exact : hits;
+      const hit = matchIn(pool);
+      if (hit && !pool.some((c) => c.st !== hit.st && c.base === hit.base)) county = hit;
+    }
+    if (county) return { state: county.st, geo: `US${county.fips}` };
+    if (!found) return null;
+    return found.kind === 'state' ? { state: found.code } : { country: found.code };
+  }
+  // A promise that's done once any place in the request is in the hash, or null when the request can't be about one.
+  function placeFromText(text) {
+    if (['goHash', 'getHash', 'localsitePath', 'getState'].some((f) => typeof window[f] !== 'function')) return null;
+    if (!PLACE_ASK_RE.test(text) && text.split(/\s+/).length > 4) return null; // a request, or only a place's name
+    return loadPlaces().then((data) => {
+      const place = findPlace(text, data);
+      if (!place) return;
+      // A new state or country drops the county; a county sets its state too.
+      window.goHash(place, place.geo ? [] : ['geo']);
+    }).catch((err) => console.warn('[claude-voice] place', err));
+  }
+
   function handleUtterance(text) {
     text = text.trim();
     if (!text) return;
@@ -2108,7 +2198,9 @@
     history.push({ role: 'user', content: text });
     logTurn('you', text);
     if (history.length > cfg.maxHistory) history = history.slice(-cfg.maxHistory);
-    askClaude();
+    // A state, country or county asked for goes into the hash first, so Claude is sent the page as it now is.
+    const place = placeFromText(text);
+    if (place) place.then(askClaude); else askClaude();
   }
 
   async function askClaude() {
