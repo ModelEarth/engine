@@ -143,7 +143,8 @@ $(document).on("change"
                   <div id="${loadingId}" class="state-iframe-loading" style="display:none">
                     Loading...
                   </div>
-                  <iframe id="${iframeId}" width="100%" height="100%" style="margin-top:-20px; margin-left:-20px; min-height:600px" src="" frameborder="0"></iframe>
+                  <!-- 20px left, so the DataUSA page's padding lines its content up with the page, and 20px wider, so its right side reaches the page column's -->
+                  <iframe id="${iframeId}" width="100%" height="100%" style="margin-top:-20px; margin-left:-20px; width:calc(100% + 20px); min-height:600px" src="" frameborder="0"></iframe>
                 </div>
               </div>
             `;
@@ -858,9 +859,7 @@ By looking at a product's entire life cycle, we can find new opportunities to re
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 15px;
-  margin-left: -20px; /* Over the iframe's top, which is shifted 20px left (margin-left:-20px) */
-  margin-right: 20px;
+  padding: 10px 15px 10px 3px; /* Across the page column, over the top of the iframe below */
   background: #f5f5f5;
   border-bottom: 1px solid #ddd;
 }
@@ -868,7 +867,7 @@ By looking at a product's entire life cycle, we can find new opportunities to re
 .state-iframe-header .datastate-select {
   margin-left: 0; /* The state name lines up with the iframe's title below */
   font-weight: 600;
-  padding: 4px 8px;
+  padding: 4px 8px 4px 0;
   border-radius: 4px;
   background: transparent;
   color: inherit;
