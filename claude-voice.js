@@ -26,8 +26,9 @@
  *                      (captions, the typing box, settings or the opened play pill), so the page can make room for it.
  *   data-idle-timeout  seconds of silence before a conversation ends on its own (default 120)
  *   data-play-button   CSS selector of a page button (such as the Earth map's play button) to move to the right end of the
- *                      controls. Hovering over it shows Audio and Motion toggles above it, in one pill with it. While
- *                      Claude replies, a click on it pauses or resumes Claude's voice and motion; otherwise it does its own job.
+ *                      controls. Hovering over it shows Audio and Motion toggles above it, in one pill with it. During a
+ *                      conversation (and while Claude is paused), a click on it pauses or resumes Claude's voice, motion and
+ *                      listening; otherwise it does its own job.
  *   data-words         "false" to skip the keywords that float over the target while Claude speaks
  *   data-words-replace CSS selector of content to fade out while keywords show (default: the target's own content,
  *                      except elements marked data-words-stay, such as a scene picture behind the words).
@@ -45,6 +46,10 @@
  *                      "interest rates", so they float as one). Default: "conversation align words sets". The panel overrides
  *                      this and remembers the choices in this browser.
  *   data-autostart    "false" to wait for a click even when the mic is already allowed
+ * The ⚙ panel's Listening choices, remembered in this browser (claude-voice:listening): Hear Me While Claude Speaks (on
+ * by default) keeps the mic on while Claude talks, leaving out Claude's own words as the mic hears them, so what you say
+ * at the same time is kept and Claude listens until you stop; End of Your Turn, the pause that sends what you said
+ * (0.5 s by default); and Mic Back After Claude, how long the mic waits after Claude speaks when it's off meanwhile.
  *   data-mic-level     "false" to skip the mic-level glow (if your device can't share the mic)
  *
  * No keys live in this file. It talks only to your own endpoint (local bridge or Cloudflare Worker).
@@ -972,7 +977,7 @@
 
   // ------------------------------------------------------------------ UI (shadow DOM so page CSS never collides)
   function UI(host, actions) {
-    if (cfg.ui === 'none') return { setState() {}, user() {}, claude() {}, extras() {}, important() {}, note() {}, fade() {}, showInput() {}, askPassphrase() {}, setVoices() {}, setVoiceMode() {}, setVoiceInfo() {}, setTextOutput() {}, setPaused() {}, setAgent() {}, addInput() {}, hideText() {}, boxes: () => [], play: null };
+    if (cfg.ui === 'none') return { setState() {}, user() {}, claude() {}, extras() {}, important() {}, note() {}, fade() {}, showInput() {}, askPassphrase() {}, setVoices() {}, setVoiceMode() {}, setVoiceInfo() {}, setTextOutput() {}, setListening() {}, setPaused() {}, setAgent() {}, addInput() {}, hideText() {}, boxes: () => [], play: null };
     let play = ds.playButton ? document.querySelector(ds.playButton) : null;
     const el = document.createElement('div');
     el.className = 'claude-voice-ui';
@@ -1063,8 +1068,8 @@
         .panel label { display: flex; flex-direction: column; gap: 5px; }
         .panel [hidden] { display: none; }
         .hint { font-size: 12px; line-height: 1.4; opacity: .75; }
-        .text-out, .agent { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.14); }
-        .text-out .head, .agent .head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
+        .text-out, .agent, .listen { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.14); }
+        .text-out .head, .agent .head, .listen .head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
         /* "Details" shows each choice's description under its one-line label. .btn-sm as in localsite's base.css, which can't reach in here. */
         .panel .btn-sm { display: inline-flex; padding: .2rem .55rem; font-size: .75rem; font-weight: 400; line-height: 1.2; border-radius: 2rem;
                          border: 1px solid rgba(255,255,255,.3); background: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
@@ -1084,7 +1089,9 @@
         .panel label.check { flex-direction: row; align-items: flex-start; gap: 8px; cursor: pointer; }
         .check input { flex: none; width: 16px; height: 16px; margin: 1px 0 0; accent-color: #9cc2e8; cursor: pointer; }
         .check small { display: none; margin-top: 2px; font-size: 12px; line-height: 1.35; opacity: .7; }
-        .text-out.open .check small { display: block; }
+        .text-out.open .check small, .listen.open .check small { display: block; }
+        .listen label:not(.check) > small { display: none; margin-top: -1px; font-size: 12px; line-height: 1.35; opacity: .7; }
+        .listen.open label:not(.check) > small { display: block; }
         .check:has(input:disabled) { opacity: .45; cursor: default; }
         /* Same height as the row's buttons; the custom arrow sits in the extra right padding. */
         select { appearance: none; -webkit-appearance: none; width: 100%; height: 38px; margin: 0; padding: 0 32px 0 14px; border-radius: 999px;
@@ -1092,7 +1099,7 @@
                  background: rgba(10,12,20,.5) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23f4f6fb' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 14px center;
                  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,.16); }
         /* The Voice choice is sized like a page's small dropdowns (the Goals page's Live Data): as wide as its text, 34px tall. */
-        select.vmode { align-self: flex-start; width: auto; max-width: 100%; height: auto; padding: 5px 32px 5px 12px; line-height: 1.55; background-position: right 13px center; }
+        select.vmode, .listen select { align-self: flex-start; width: auto; max-width: 100%; height: auto; padding: 5px 32px 5px 12px; line-height: 1.55; background-position: right 13px center; }
         select:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
         option, optgroup { color: #111; background: #fff; }
         button { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; padding: 9px 14px; border-radius: 999px;
@@ -1119,7 +1126,7 @@
         .minimal .cap { display: none; }
         /* The page's play button (data-play-button), or this widget's own when the page has none, at the row's right end, in a pill that grows upward over the
            captions on hover, showing the Audio and Motion toggles above it. A paused toggle turns grey. */
-        .ctl { position: relative; width: 38px; height: 38px; flex: none; }
+        .ctl { position: relative; z-index: 2; width: 38px; height: 38px; flex: none; } /* Above the Conversation box (.important, z-index 1) it grows over */
         .ctl-pill { position: absolute; right: 0; bottom: 0; width: 38px; display: flex; flex-direction: column; align-items: flex-end; border-radius: 19px; overflow: hidden; transition: width .2s ease;
                     background: rgba(10,12,20,.5); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,.16); }
         .more { display: flex; flex-direction: column; align-items: flex-end; max-height: 0; overflow: hidden; transition: max-height .2s ease; width: 100%; }
@@ -1169,6 +1176,12 @@
             <label class="check"><input type="checkbox" name="align"><span>Align Conversation<small>All panels are the same width.</small></span></label>
             <label class="check"><input type="checkbox" name="words"><span>Large Words<small>Keywords float over the page, large and small, as Claude speaks.</small></span></label>
             <label class="check"><input type="checkbox" name="sets"><span>Precise Word Sets<small>Claude marks words that belong together, such as "interest rates", so they show as one.</small></span></label>
+          </div>
+          <div class="listen" role="group" aria-labelledby="cv-listen">
+            <div class="head"><span id="cv-listen">Listening</span><button class="details btn-sm" type="button" aria-expanded="false">Details</button></div>
+            <label class="check"><input type="checkbox" name="overlap"><span>Hear Me While Claude Speaks<small>The mic stays on while Claude talks. Claude's own words are left out of what it hears, so what you say at the same time is kept, and Claude listens until you stop.</small></span></label>
+            <label>End of Your Turn<select name="endPause"><option value="500">0.5 seconds</option><option value="1000">1 second</option><option value="1500">1.5 seconds</option><option value="2500">2.5 seconds</option></select><small>How long a pause in your speaking sends what you said.</small></label>
+            <label class="mic-back">Mic Back After Claude<select name="micBack"><option value="250">0.25 seconds</option><option value="700">0.7 seconds</option><option value="1200">1.2 seconds</option></select><small>With Hear Me While Claude Speaks off, the mic is off while Claude talks and comes back this long after, once the echo has faded.</small></label>
           </div>
           <div class="agent" role="group" aria-labelledby="cv-agent">
             <div class="head"><span id="cv-agent">Agent</span><a class="btn-sm keys" href="#edit=keys" title="Set My Keys">Keys</a></div>
@@ -1248,6 +1261,10 @@
     detailsBtn.addEventListener('click', () => detailsBtn.setAttribute('aria-expanded', String(textOutBox.classList.toggle('open'))));
     const checks = [...root.querySelectorAll('.text-out input')];
     checks.forEach((c) => c.addEventListener('change', () => actions.textOutput(c.name, c.checked)));
+    const listenBox = $('.listen'), listenDetails = $('.listen .details');
+    listenDetails.addEventListener('click', () => listenDetails.setAttribute('aria-expanded', String(listenBox.classList.toggle('open'))));
+    const listenInputs = [...root.querySelectorAll('.listen input, .listen select')];
+    listenInputs.forEach((c) => c.addEventListener('change', () => actions.listening(c.name, c.type === 'checkbox' ? c.checked : Number(c.value))));
     const audioBtn = $('.audio'), motionBtn = $('.motion'), ownPlay = $('.playPauseButton');
     audioBtn.addEventListener('click', actions.audio);
     motionBtn.addEventListener('click', actions.motion);
@@ -1474,6 +1491,12 @@
       setVoiceMode(m) { modeSel.value = m; pick.hidden = m !== 'chosen'; },
       setVoiceInfo(m, name) { hint.textContent = VOICE_HINTS[m] + (name && m !== 'chosen' ? ` Now: ${name}.` : ''); },
       /** Text Output: { conversation, important, align, words, sets } as booleans. noWords: the page turned the floating words off (data-words). */
+      /** Listening: { overlap, endPause, micBack }; noSR: no speech recognition here, so the section is hidden. */
+      setListening(o, noSR) {
+        listenBox.hidden = noSR;
+        listenInputs.forEach((c) => { if (c.type === 'checkbox') c.checked = !!o[c.name]; else c.value = String(o[c.name]); });
+        $('.mic-back').hidden = !!o.overlap;
+      },
       setTextOutput(o, noWords) {
         checks.forEach((c) => {
           c.checked = !!o[c.name];
@@ -1484,9 +1507,9 @@
         wrap.classList.toggle('no-important', !o.important);
         wrap.classList.toggle('align', !!o.align);
       },
-      setPaused(audio, motion) {
+      setPaused(audio, motion, listening) {
         toggleLabel(audioBtn, audio, 'voice'); toggleLabel(motionBtn, motion, 'motion');
-        const held = audio || motion, t = held ? 'Resume Claude' : 'Pause Claude';
+        const held = audio || motion || listening, t = held ? 'Resume Claude' : 'Pause Claude';
         // While paused, the Conversation box shows (even with Important Text off), so its ⋯ menu can be reached.
         importantCap.classList.toggle('pinned', held);
         importantCap.hidden = !held && !importantText.textContent;
@@ -1531,6 +1554,14 @@
   };
 
   // Brave exposes SpeechRecognition but disables the service behind it, so every attempt ends in a "network" error.
+  // Chrome on Mac (tested Nov 2026, Chrome 157 on macOS) counts as able to listen, and its recognition starts and reaches
+  // Google's service with no "network" error, but it hasn't heard speech: speech input didn't work for the site's owner,
+  // and in a test with a spoken WAV as Chrome's fake microphone (--use-fake-device-for-media-stream with
+  // --use-file-for-fake-audio-capture, plus --disable-features=AudioServiceSandbox so the audio service can read the
+  // file), getUserMedia got the sound at full level but recognition always ended in "no-speech". So recognition seems
+  // to take the real microphone, which needs macOS to allow Chrome (System Settings > Privacy & Security > Microphone);
+  // that wasn't confirmed. Soon after, Chrome's speech input did work for the owner, with no change to this code, so
+  // project/goals has CHROME_SPEECH (true) to say whether Chrome is asked for spoken answers and suggested for them.
   const isBrave = !!navigator.brave;
   const SR = isBrave ? null : (window.SpeechRecognition || window.webkitSpeechRecognition);
   const NO_SR_NOTE = isBrave
@@ -1544,7 +1575,7 @@
   const SPOKEN_SENTENCES = 2, SPOKEN_WORDS = 40;
   let unspoken = [], spokenN = 0, spokenW = 0;
   let speakQueue = [], speaking = null, streamDone = true, ttsUnlocked = false, voice = null, currentSentence = '';
-  let audioPaused = false, motionPaused = false;
+  let audioPaused = false, motionPaused = false, listenPaused = false;
   let voiceBlockNoted = false; // a "voice was blocked" note shows once, until speech works again
 
   const ui = UI(host, {
@@ -1579,7 +1610,7 @@
     },
     audio() { setAudioPaused(!audioPaused); },
     motion() { setMotionPaused(!motionPaused); },
-    hold() { const p = !(audioPaused || motionPaused); setAudioPaused(p); setMotionPaused(p); }, // the widget's own play button
+    hold() { hold(!(audioPaused || motionPaused || listenPaused)); }, // the widget's own play button
     playAdopted() { syncPlayButton(); },
     panelOpened() { checkAgent(); },
     keys: setMyKeys,
@@ -1588,47 +1619,76 @@
       store(TEXT_KEY, JSON.stringify(textOut));
       applyTextOutput();
     },
+    listening(name, value) {
+      listenOpt[name] = value;
+      store(LISTEN_KEY, JSON.stringify(listenOpt));
+      ui.setListening(listenOpt, !SR);
+      if (name === 'overlap') micHold(mode === 'speaking'); // Turned on while Claude speaks, the mic comes back now
+    },
   });
 
-  // The mic hears Claude through the speakers, so it's switched off while Claude speaks and back on just after (the tail of the echo). Tap or Escape interrupts.
+  // The mic hears Claude through the speakers. With Hear Me While Claude Speaks (listenOpt.overlap) it stays on, and Claude's
+  // own words are taken out of what it hears (heard()). Otherwise it's switched off while Claude speaks and back on
+  // listenOpt.micBack after (the tail of the echo). Tap or Escape interrupts.
   let micHeld = false, micTimer;
   function micHold(on) {
     clearTimeout(micTimer);
+    if (on && listenOpt.overlap) on = false;
     if (on) { micHeld = true; if (rec && recRunning) try { rec.abort(); } catch (e) { /* ignore */ } }
-    else if (micHeld) micTimer = setTimeout(() => { micHeld = false; if (wantListening && !recRunning) try { rec.start(); } catch (e) { /* already starting */ } }, 700);
+    else if (micHeld) micTimer = setTimeout(() => { micHeld = false; if (wantListening && !recRunning && !listenPaused) try { rec.start(); } catch (e) { /* already starting */ } }, listenOpt.micBack);
   }
   function setMode(m) {
+    if (m === 'speaking' && mode !== 'speaking' && Date.now() >= echoUntil) { echoWords = []; echoStarts = new Set(); } // a new stretch of Claude's voice
+    if (mode === 'speaking' && m !== 'speaking') echoUntil = Date.now() + ECHO_TAIL;
     mode = m; micHold(m === 'speaking');
-    const labels = { off: 'Enable voice', wake: SR ? 'Say “Ok Claude”' : 'Type to start', listening: 'Listening… say “Thanks” to finish', thinking: 'Thinking…', speaking: 'Speaking… tap to interrupt', error: 'Voice unavailable' };
-    ui.setState(m, labels[m] || m);
+    showState();
     scene.setActivity(m === 'wake' ? 'idle' : m === 'off' ? 'off' : m);
     syncPlayButton();
     emit('state', { state: m });
   }
 
-  // --- pausing: Claude's voice holds mid-word (and later replies wait), and its motion freezes, until resumed
+  const LABELS = { off: 'Enable voice', wake: SR ? 'Say “Ok Claude”' : 'Type to start', listening: 'Listening… say “Thanks” to finish', thinking: 'Thinking…', speaking: 'Speaking… tap to interrupt', error: 'Voice unavailable' };
+  function showState() { ui.setState(mode, listenPaused && SR && mode !== 'off' && mode !== 'error' ? 'Listening paused' : LABELS[mode] || mode); }
+
+  // --- pausing: Claude's voice holds mid-word (and later replies wait), and its motion freezes, until resumed. The pause
+  // button (hold) also stops listening, words you were partway through included, and starts it again on resume.
   const replying = () => mode === 'speaking' || mode === 'thinking';
+  const playForClaude = () => replying() || mode === 'listening' || listenPaused;
   function setAudioPaused(p) {
     audioPaused = !!p;
     if (audioPaused) speakQueue.filter((it) => it.showWords).forEach((it) => { wordField.sentence(it.text, null); it.showWords = false; }); // as in enqueueSpeech
     if (tts) { if (audioPaused) tts.pause(); else tts.resume(); }
-    ui.setPaused(audioPaused, motionPaused); syncPlayButton();
+    ui.setPaused(audioPaused, motionPaused, listenPaused); syncPlayButton();
   }
   function setMotionPaused(p) {
     motionPaused = !!p;
     scene.setPaused(motionPaused); wordField.setPaused(motionPaused);
-    ui.setPaused(audioPaused, motionPaused); syncPlayButton();
+    ui.setPaused(audioPaused, motionPaused, listenPaused); syncPlayButton();
   }
-  // While Claude replies, the page's play button (data-play-button) shows pause or play for Claude, and a click on it
-  // pauses or resumes Claude's voice and motion together, ahead of the page's own listeners. Afterwards its icon and
+  function setListenPaused(p) {
+    listenPaused = !!p;
+    if (listenPaused) {
+      clearTimeout(sendTimer); clearTimeout(idleTimer); pending = ''; consumedUpTo = -1;
+      if (rec && recRunning) try { rec.abort(); } catch (e) { /* ignore */ }
+    } else {
+      if (wantListening && !micHeld && rec && !recRunning) try { rec.start(); } catch (e) { /* already starting */ }
+      if (mode === 'listening') resetIdle();
+    }
+    showState();
+    ui.setPaused(audioPaused, motionPaused, listenPaused); syncPlayButton();
+  }
+  function hold(p) { setAudioPaused(p); setMotionPaused(p); setListenPaused(p); }
+  // During a conversation (listening, thinking or speaking), or while listening is paused, the page's play button
+  // (data-play-button) shows pause or play for Claude, and a click on it pauses or resumes Claude (hold), ahead of the
+  // page's own listeners. Afterwards its icon and
   // label go back to the page's, including any change the page made to them meanwhile.
   let ownPlay = null, pagePlay = null;
   function syncPlayButton() {
     const btn = ui.play, icon = btn && btn.querySelector('.material-icons');
     if (!icon) return;
     if (!ownPlay || icon.textContent !== ownPlay.icon || btn.title !== ownPlay.title) pagePlay = { icon: icon.textContent, title: btn.title, label: btn.getAttribute('aria-label') };
-    if (replying()) {
-      const held = audioPaused || motionPaused;
+    if (playForClaude()) {
+      const held = audioPaused || motionPaused || listenPaused;
       ownPlay = { icon: held ? 'play_arrow' : 'pause', title: held ? 'Resume Claude' : 'Pause Claude' };
       icon.textContent = ownPlay.icon; btn.title = ownPlay.title; btn.setAttribute('aria-label', ownPlay.title);
     } else if (ownPlay) {
@@ -1639,11 +1699,10 @@
   }
   {
     const onPlay = (e) => {
-      if (!replying() || !ui.play || !ui.play.contains(e.target)) return;
+      if (!playForClaude() || !ui.play || !ui.play.contains(e.target)) return;
       if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
       e.preventDefault(); e.stopImmediatePropagation();
-      const p = !(audioPaused || motionPaused);
-      setAudioPaused(p); setMotionPaused(p);
+      hold(!(audioPaused || motionPaused || listenPaused));
     };
     window.addEventListener('click', onPlay, true); // Capturing on window runs before the page's listeners, even capturing ones on document
     window.addEventListener('keydown', onPlay, true);
@@ -1884,6 +1943,15 @@
   }
   applyTextOutput();
 
+  // Listening, also in the settings panel (the header's notes): remembered in this browser.
+  const LISTEN_KEY = 'claude-voice:listening';
+  const listenOpt = { overlap: true, endPause: 500, micBack: 700 };
+  try {
+    const saved = JSON.parse(localStorage.getItem(LISTEN_KEY) || 'null');
+    if (saved) Object.keys(listenOpt).forEach((k) => { if (typeof saved[k] === typeof listenOpt[k]) listenOpt[k] = saved[k]; });
+  } catch (e) { /* storage blocked or unreadable */ }
+  ui.setListening(listenOpt, !SR);
+
   wordField.setCovers(ui.boxes);
   wordField.setPick(ui.addInput);
 
@@ -1943,11 +2011,11 @@
   // --- speech recognition
   function startRecognition() {
     wantListening = true;
-    if (!SR || recRunning) return;
+    if (!SR || recRunning || listenPaused) return;
     if (!rec) {
       rec = new SR();
       rec.continuous = true; rec.interimResults = true; rec.lang = cfg.lang; rec.maxAlternatives = 1;
-      rec.onstart = () => { recRunning = true; consumedUpTo = -1; };
+      rec.onstart = () => { recRunning = true; consumedUpTo = -1; echoResults.clear(); };
       rec.onresult = onResult;
       rec.onerror = (e) => {
         if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
@@ -1962,24 +2030,89 @@
       };
       rec.onend = () => {
         recRunning = false;
-        if (wantListening && !micHeld) setTimeout(() => { if (wantListening && !recRunning && !micHeld) { try { rec.start(); } catch (e) { /* already starting */ } } }, restartDelay);
+        if (wantListening && !micHeld && !listenPaused) setTimeout(() => { if (wantListening && !recRunning && !micHeld && !listenPaused) { try { rec.start(); } catch (e) { /* already starting */ } } }, restartDelay);
       };
     }
     try { rec.start(); } catch (e) { /* already running */ }
   }
   function stopRecognition() { wantListening = false; if (rec && recRunning) try { rec.abort(); } catch (e) { /* ignore */ } }
 
-  // Half a second without new words means you've finished. The recogniser's own "final" result can lag well
-  // behind that, so the pause is timed from the last interim words and acted on without waiting for the final.
-  const SEND_DELAY = 500;
+  // A pause of listenOpt.endPause (half a second unless changed) without new words means you've finished. The recogniser's
+  // own "final" result can lag well behind that, so the pause is timed from the last interim words and acted on without
+  // waiting for the final.
   let lastHeard = 0, consumedUpTo = -1; // consumedUpTo: results already acted on from interim text, whose late finals are skipped
+
+  // Claude's own voice, as the mic hears it, taken out of what's recognized while Hear Me While Claude Speaks is on.
+  // echoWords: the words Claude has spoken since its voice last started after a quiet spell, and echoStarts where each
+  // of its sentences begins in them. A result first heard while Claude speaks, or within ECHO_TAIL after, is checked
+  // against them (to its final, even once that's later). A run of Claude's words in Claude's order is Claude's when it
+  // matches ECHO_RUN or more of them, or 2 from the start of a sentence or where the last run ended, or the whole result.
+  // Words count as matching when near enough ("grew" for "grow"), and a run can pass over one word heard wrong
+  // ("go up" for "grow up"), starting with the same letter, when the next one matches. What's left is yours; shorter matches stay, since answers
+  // often repeat a question's words.
+  const ECHO_TAIL = 1500, ECHO_RUN = 3;
+  let echoWords = [], echoStarts = new Set(), echoUntil = 0;
+  const echoResults = new Set(); // indexes of this recognition session's results first heard with the echo about
+  const echoNear = () => mode === 'speaking' || Date.now() < echoUntil;
+  const plain = (w) => w.toLowerCase().replace(/[^\p{L}\p{N}']+/gu, '');
+  function sameWord(a, b) {
+    if (a === b) return true;
+    if (Math.min(a.length, b.length) < 3 || Math.abs(a.length - b.length) > 1) return false;
+    let i = 0, j = 0, edits = 0; // at most one letter added, dropped or changed
+    while (i < a.length && j < b.length) {
+      if (a[i] === b[j]) { i++; j++; continue; }
+      if (++edits > 1) return false;
+      if (a.length > b.length) i++; else if (b.length > a.length) j++; else { i++; j++; }
+    }
+    return edits + (a.length - i) + (b.length - j) <= 1;
+  }
+  // The run of Claude's words from echoWords[a] heard from words[t]: { len (words of the result), hits (matched) }.
+  function echoRun(words, t, a) {
+    let len = 0, hits = 0;
+    while (t + len < words.length && a + len < echoWords.length) {
+      if (sameWord(words[t + len], echoWords[a + len])) { len++; hits++; continue; }
+      const next = t + len + 1;
+      if (hits && next < words.length && a + len + 1 < echoWords.length && words[t + len][0] === echoWords[a + len][0]
+        && sameWord(words[next], echoWords[a + len + 1])) { len++; continue; }
+      break;
+    }
+    return { len, hits };
+  }
+  function heard(text, i) {
+    if (!listenOpt.overlap || !echoWords.length) return text;
+    if (echoNear()) echoResults.add(i);
+    if (!echoResults.has(i)) return text;
+    const said = text.split(/\s+/).filter(Boolean), words = said.map(plain);
+    const kept = [];
+    let after = -1; // where the last run of Claude's words ended in echoWords
+    for (let t = 0; t < words.length;) {
+      let best = { len: 0, hits: 0 }, at = 0;
+      for (let a = 0; a < echoWords.length; a++) {
+        const run = echoRun(words, t, a);
+        const need = echoStarts.has(a) || a === after ? 2 : ECHO_RUN;
+        if (run.len > best.len && (run.hits >= need || run.len === words.length)) { best = run; at = a; }
+      }
+      if (best.len) { t += best.len; after = at + best.len; } else kept.push(said[t++]);
+    }
+    return kept.join(' ');
+  }
+  function echoSpoken(text) {
+    const add = text.split(/\s+/).map(plain).filter(Boolean);
+    if (add.length) echoStarts.add(echoWords.length);
+    echoWords = echoWords.concat(add);
+  }
+  // What you said, once you've stopped: sent now, or while Claude is still speaking (heard over it), after it finishes.
+  function deliver(t) {
+    if (mode === 'speaking') { queuedTurn = (queuedTurn + ' ' + t).trim(); return; }
+    handleUtterance(t);
+  }
 
   function onResult(e) {
     restartDelay = 250; networkErrors = 0;
     let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
       if (i <= consumedUpTo) continue;
-      const r = e.results[i], text = r[0].transcript.trim();
+      const r = e.results[i], text = heard(r[0].transcript.trim(), i);
       if (!text) continue;
       if (r.isFinal) onFinal(text); else interim += text + ' ';
     }
@@ -1987,11 +2120,11 @@
     if (!interim) return;
     lastHeard = Date.now();
     const upTo = e.results.length - 1;
-    const afterPause = (fn) => { clearTimeout(sendTimer); sendTimer = setTimeout(() => { consumedUpTo = upTo; fn(); }, SEND_DELAY); };
-    if (mode === 'listening') {
+    const afterPause = (fn) => { clearTimeout(sendTimer); sendTimer = setTimeout(() => { consumedUpTo = upTo; fn(); }, listenOpt.endPause); };
+    if (mode === 'listening' || (mode === 'speaking' && listenOpt.overlap)) {
       ui.user((pending + ' ' + interim).trim());
       resetIdle();
-      afterPause(() => { const t = (pending + ' ' + interim.replace(WAKE_RE, ' ')).trim(); pending = ''; handleUtterance(t); });
+      afterPause(() => { const t = (pending + ' ' + interim.replace(WAKE_RE, ' ')).trim(); pending = ''; deliver(t); });
     } else if (mode === 'thinking') {
       ui.user((pending + ' ' + interim).trim());
       resetIdle();
@@ -2012,25 +2145,26 @@
       return;
     }
     if (mode === 'speaking') {
-      // Only listen for "thanks" (or the wake phrase) while Claude talks; anything else is probably Claude's own voice.
-      if (/thank/i.test(currentSentence)) return;
-      if (isThanks(text)) { interrupt(); endConversation(true); }
-      else if (WAKE_RE.test(text)) { interrupt(); const rest = text.slice(text.match(WAKE_RE).index + text.match(WAKE_RE)[0].length).trim(); if (rest) handleUtterance(rest); }
-      return;
+      // "Thanks" or the wake phrase while Claude talks. Anything else is kept (below) with Hear Me While Claude Speaks,
+      // its own words already taken out; without it, it's probably Claude's own voice.
+      if (!listenOpt.overlap && /thank/i.test(currentSentence)) return;
+      if (isThanks(text)) { interrupt(); endConversation(true); return; }
+      if (WAKE_RE.test(text)) { interrupt(); const rest = text.slice(text.match(WAKE_RE).index + text.match(WAKE_RE)[0].length).trim(); if (rest) handleUtterance(rest); return; }
+      if (!listenOpt.overlap) return;
     }
     if (mode === 'thinking') {
       if (isThanks(text)) { interrupt(); endConversation(true); } else queuedTurn = (queuedTurn + ' ' + text).trim();
       return;
     }
-    if (mode === 'listening') {
+    if (mode === 'listening' || mode === 'speaking') {
       const cleaned = text.replace(WAKE_RE, ' ').trim(); // "Ok Claude" again mid-conversation is harmless
       if (!cleaned) return;
       pending = (pending + ' ' + cleaned).trim();
       ui.user(pending);
       resetIdle();
       clearTimeout(sendTimer);
-      const wait = Math.max(0, SEND_DELAY - (Date.now() - lastHeard)); // the pause already started at your last words
-      sendTimer = setTimeout(() => { const t = pending; pending = ''; handleUtterance(t); }, wait);
+      const wait = Math.max(0, listenOpt.endPause - (Date.now() - lastHeard)); // the pause already started at your last words
+      sendTimer = setTimeout(() => { const t = pending; pending = ''; deliver(t); }, wait);
     }
   }
 
@@ -2106,6 +2240,7 @@
 
   function resetIdle() {
     clearTimeout(idleTimer);
+    if (listenPaused) return; // started again on resume
     idleTimer = setTimeout(() => { if (mode === 'listening') { ui.note('Conversation ended after a quiet spell. Say “Ok Claude” to start again.', 6000); endConversation(false); } }, cfg.idleTimeout);
   }
 
@@ -2478,7 +2613,7 @@
     if (voice) u.voice = voice;
     u.lang = (voice && voice.lang) || cfg.lang; u.rate = 1.02; u.pitch = 1;
     u.onboundary = (ev) => { if (ev.name === 'word' || ev.name === undefined) scene.pulse(0.06 + 0.12 * (scene.state.energy || 0)); };
-    u.onstart = () => { voiceBlockNoted = false; scene.pulse(0.15); };
+    u.onstart = () => { voiceBlockNoted = false; scene.pulse(0.15); echoSpoken(spoken); };
     u.onend = finish;
     u.onerror = (e) => {
       // Browsers refuse to speak ("not-allowed") until the page has had a click or key press, and when the site's
