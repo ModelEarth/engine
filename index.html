@@ -134,13 +134,13 @@ $(document).on("change"
             const wrapperId = `wrapper-state-${index}`;
             const stateOptions = generateStateOptions(stateCode);
             const wrapperHtml = `
-              <div id="${wrapperId}" class="state-iframe-wrapper" style="position:relative; margin-bottom:30px; border:1px solid #ddd; border-radius:4px; overflow:hidden;">
-                <div style="position:relative; z-index:100; display:flex; align-items:center; justify-content:space-between; padding:10px 15px; background:#f5f5f5; border-bottom:1px solid #ddd;">
-                  <select class="datastate-select" data-iframe-id="${iframeId}" data-index="${index}" style="font-size:16px; font-weight:600; padding:4px 8px; border:1px solid #ccc; border-radius:4px; background:transparent; cursor:pointer;">${stateOptions}</select>
-                  <div class="remove-state-btn" data-state="${stateCode}" data-index="${index}" style="cursor:pointer; width:24px; height:24px; border-radius:50%; background:#fff; border:1px solid #ccc; display:flex; align-items:center; justify-content:center; font-size:14px; color:#666; transition:all 0.2s;" onmouseover="this.style.background='#f44336'; this.style.color='#fff'; this.style.borderColor='#f44336'" onmouseout="this.style.background='#fff'; this.style.color='#666'; this.style.borderColor='#ccc'">&times;</div>
+              <div id="${wrapperId}" class="state-iframe-wrapper">
+                <div class="state-iframe-header">
+                  <select class="datastate-select" data-iframe-id="${iframeId}" data-index="${index}" aria-label="State">${stateOptions}</select>
+                  <div class="remove-state-btn" data-state="${stateCode}" data-index="${index}" role="button" title="Remove" aria-label="Remove state">&times;</div>
                 </div>
                 <div style="position:relative;">
-                  <div id="${loadingId}" style="display:none; position:absolute; top:10px; right:10px; padding:8px 12px; background:rgba(255,255,255,0.95); border:1px solid #ddd; border-radius:4px; z-index:10; font-size:14px; color:#666; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+                  <div id="${loadingId}" class="state-iframe-loading" style="display:none">
                     Loading...
                   </div>
                   <iframe id="${iframeId}" width="100%" height="100%" style="margin-top:-20px; margin-left:-20px; min-height:600px" src="" frameborder="0"></iframe>
@@ -539,7 +539,7 @@ Only the treemap and matrix (#matrixSection) show at first. The menu at their to
 
   <!-- viz=false to show adjacent text is showing N/A -->
   <div style="position:relative;">
-    <div id="iframe-loading" style="display:none; position:absolute; top:10px; right:10px; padding:8px 12px; background:rgba(255,255,255,0.95); border:1px solid #ddd; border-radius:4px; z-index:10; font-size:14px; color:#666; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+    <div id="iframe-loading" class="state-iframe-loading" style="display:none">
       Loading...
     </div>
     <div id="iframe-container" style="display:none;"></div>
@@ -691,10 +691,18 @@ Only the treemap and matrix (#matrixSection) show at first. The menu at their to
 <div class="lite">
 <div id="main-info-contentX" class="content contentpadding engineWidth" style="clear:both; padding-top:50px;">
 
-  <div class="floatRight hideMobile" style="border:1px solid #ccc; margin-bottom:0px;">
+
+  <div class="floatRight hideMobile" style="margin-bottom:0px;">
+
+    <!--
     <div>
       <a href="../io/coders/" target="_parent" ><img id="right-image" src="../io/img/side/code-square.jpg" style=""></a>
     </div>
+    -->
+    
+    <a href="../io"><img src="../io/img/side/feature.jpg" style="width:100%;max-width:500px;border-radius: 25px;"></a><br>
+  
+
     <div style="padding:30px; padding-top:10px; padding-bottom:20px">
 
       <div style="display:none" class="../challenge/">
@@ -727,11 +735,6 @@ Join us for 5 or more hours during Democracy Lab's 48 HOUR EARTH DAY on April 22
 
 <h2>Community Apps for Life&nbsp;Cycle&nbsp;Assessment&nbsp;(LCA)</h2>
 
-<!-- copied from /io -->
-<a href="https://www.epa.gov/sciencematters/epa-researchers-working-improve-life-cycle-assessment-capabilities-communities" style="font-size:18px" target="_blank">Working to Improve Life-Cycle Assessment for Communities</a><br>
-
-Sustainable Materials Management (SMM) is a systemic approach to using and reusing materials more productively over their entire life cycle. It represents a change in how our society thinks about the use of natural resources and environmental protection. By looking at a product's entire life cycle, we can find new opportunities to reduce environmental impacts, conserve resources, reduce costs and attract new industries.<br><br>
-
 <!--
 <p>
 The U.S. Environmental Protection Agency (EPA), Code for America, and the Georgia Center of Innovation for Energy Technology have launched the Sustainable Communities Web Challenge, which will award a total of up to $10,000 across all winning participants. The purpose of this challenge is to customize our interactive community starter pages for a community of interest. These pages integrate tools that show the relationships between industries and the environment and local economy with an eye toward informing community decisions around sustainability. Sustainable communities promote health and well-being, such as through materials reuse and recycling, and prevention of environmental releases, while also being economically robust.
@@ -757,15 +760,12 @@ Companies like Amazon and General Motors are using the US Environmentally Extend
   Using an economy-wide input-output model of industries, households and the environment, the new online tools help communities identify opportunities for both economic growth and environmental sustainability.
 
 </p>
-<!--
-Register to participate.
 
-Learn more about the Challenge. 
+<a href="https://www.epa.gov/sciencematters/epa-researchers-working-improve-life-cycle-assessment-capabilities-communities" style="font-size:18px" target="_blank">Working to Improve Life-Cycle Assessment for Communities</a><br>
 
-Virtual workshops and Slack channel Information.
+Sustainable Materials Management (SMM) is a systemic approach to reusing materials more productively over their entire life cycle. 
+By looking at a product's entire life cycle, we can find new opportunities to reduce environmental impacts, conserve resources, reduce costs and support new industries.<br><br>
 
-Learn more about USEEIO.
--->
 
 </div>
 <div style="clear:both"></div>
@@ -789,9 +789,10 @@ Learn more about USEEIO.
       </div>
 
       <div style="margin-top:-6px; display:flex; align-items:center; gap:40px;">
-        <a href="https://exiobase.eu" target="_blank" id="exiobaselogo"><img src="https://model.earth/community/img/logo/orgs/exiobase.png" style="width:190px;"></a>
+        <!-- The -dark.png versions have light text, for dark mode (.logo-light and .logo-dark below) -->
+        <a href="https://exiobase.eu" target="_blank" id="exiobaselogo"><img class="logo-light" src="https://model.earth/community/img/logo/orgs/exiobase.png" style="width:190px;" alt="EXIOBASE"><img class="logo-dark" src="https://model.earth/community/img/logo/orgs/exiobase-dark.png" style="width:190px;" alt="EXIOBASE"></a>
 
-        <a href="https://datacommons.org" target="_blank"><img src="https://model.earth/community/img/logo/orgs/GoogleDataCommons.png" style="width:200px;"></a>
+        <a href="https://datacommons.org" target="_blank"><img class="logo-light" src="https://model.earth/community/img/logo/orgs/GoogleDataCommons.png" style="width:200px;" alt="Data Commons"><img class="logo-dark" src="https://model.earth/community/img/logo/orgs/GoogleDataCommons-dark.png" style="width:200px;" alt="Data Commons"></a>
       </div>
 
     </div>
@@ -836,9 +837,98 @@ Learn more about USEEIO.
   margin-left: -20px;
   font-size: 20px !important;
 }
+/* Logos with a version for dark backgrounds */
+#logoRow .logo-dark, .dark #logoRow .logo-light {
+  display: none;
+}
+.dark #logoRow .logo-dark {
+  display: inline;
+}
 .state-iframe-wrapper {
+  position: relative;
+  margin-bottom: 30px;
+  border-radius: 4px;
   border: none !important;
   overflow: visible !important;
+}
+/* DataUSA state header: the state menu and the remove button (updateDataUSAIframe), with dark mode */
+.state-iframe-header {
+  position: relative;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 15px;
+  margin-left: -20px; /* Over the iframe's top, which is shifted 20px left (margin-left:-20px) */
+  margin-right: 20px;
+  background: #f5f5f5;
+  border-bottom: 1px solid #ddd;
+}
+/* Over the site's select styles, which add a background arrow next to this select's own */
+.state-iframe-header .datastate-select {
+  margin-left: 0; /* The state name lines up with the iframe's title below */
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.remove-state-btn {
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid #ccc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: #666;
+  transition: all 0.2s;
+}
+.remove-state-btn:hover {
+  background: #f44336;
+  border-color: #f44336;
+  color: #fff;
+}
+.state-iframe-loading {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.95);
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  z-index: 10;
+  font-size: 14px;
+  color: #666;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+.dark .state-iframe-header {
+  background: var(--bg-card, #2b2926);
+  border-bottom-color: var(--border-subtle, #374151);
+  color: var(--text-main, #e5e7eb);
+}
+.dark .datastate-select option {
+  background: var(--bg-card, #2b2926);
+  color: var(--text-main, #e5e7eb);
+}
+.dark .remove-state-btn {
+  background: var(--bg-page, #111827);
+  border-color: var(--border-subtle, #374151);
+  color: #bbb;
+}
+.dark .remove-state-btn:hover {
+  background: #f44336;
+  border-color: #f44336;
+  color: #fff;
+}
+.dark .state-iframe-loading {
+  background: rgba(43, 41, 38, 0.95);
+  border-color: var(--border-subtle, #374151);
+  color: var(--text-main, #e5e7eb);
 }
 </style>
 
