@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Local bridge for claude-voice.js — run on your machine while developing on localhost.
 //
-//   node server/local-bridge.mjs                 # API endpoint only (http://localhost:8790/api/claude-voice)
-//   node server/local-bridge.mjs --serve ../     # also serve your webroot at http://localhost:8790/
+//   node server/local-bridge.mjs                 # API endpoint only (http://localhost:3703/api/claude-voice)
+//   node server/local-bridge.mjs --serve ../     # also serve your webroot at http://localhost:3703/
 //
 // LOCAL_BACKEND=cli (default) answers through the Claude Code CLI using your logged-in Claude account. It can read the
 //   webroot's files (this submodule's parent folder) to answer questions about the site, but not change them or read anything
@@ -45,7 +45,7 @@ const args = process.argv.slice(2);
 const serveIdx = args.indexOf('--serve');
 const SERVE_ROOT = serveIdx >= 0 ? path.resolve(args[serveIdx + 1] || '.') : (process.env.BRIDGE_SERVE_ROOT ? path.resolve(process.env.BRIDGE_SERVE_ROOT) : null);
 
-const PORT = Number(process.env.BRIDGE_PORT || 8790);
+const PORT = Number(process.env.BRIDGE_PORT || 3703);
 const HOST = process.env.BRIDGE_HOST || '127.0.0.1';
 const MODEL = process.env.CLAUDE_MODEL || DEFAULT_MODEL;
 const BACKEND = (process.env.LOCAL_BACKEND || 'cli').toLowerCase();

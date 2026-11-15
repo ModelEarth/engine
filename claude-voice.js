@@ -12,7 +12,7 @@
  *   data-target        CSS selector of the div to animate (default: the script's parent div, else <body>)
  *   data-endpoint      API URL (default: local bridge on localhost, else /api/claude-voice on the site this script came
  *                      from, such as neighborhood.org for a page on another site that loads localsite from there)
- *   data-bridge-port   port of server/local-bridge.mjs (default 8790)
+ *   data-bridge-port   port of server/local-bridge.mjs (default 3703)
  *   data-lang          speech language (default: page lang or en-US)
  *   data-voice         part of a preferred TTS voice name, e.g. "Samantha" or "Google UK English Female"
  *   data-voice-mode    "chosen", "random" (new voice each conversation) or "response" (new voice each reply, suited
@@ -49,7 +49,7 @@
  * The ⚙ panel's Listening choices, remembered in this browser (claude-voice:listening): Hear Me While Claude Speaks (on
  * by default) keeps the mic on while Claude talks, leaving out Claude's own words as the mic hears them, so what you say
  * at the same time is kept and Claude listens until you stop; End of Your Turn, the pause that sends what you said
- * (0.5 s by default); and Mic Back After Claude, how long the mic waits after Claude speaks when it's off meanwhile.
+ * (0.8 s by default); and Mic Back After Claude, how long the mic waits after Claude speaks when it's off meanwhile.
  *   data-mic-level     "false" to skip the mic-level glow (if your device can't share the mic)
  *
  * No keys live in this file. It talks only to your own endpoint (local bridge or Cloudflare Worker).
@@ -80,7 +80,7 @@
   const script = document.currentScript || document.querySelector('script[src*="claude-voice"]');
   const ds = (script && script.dataset) || {};
   const isLocal = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || location.hostname.endsWith('.localhost');
-  const bridgePort = String(ds.bridgePort || 8790);
+  const bridgePort = String(ds.bridgePort || 3703);
   const scriptOrigin = (() => { try { return new URL(script.src).origin; } catch (e) { return location.origin; } })();
   const cfg = {
     endpoint: ds.endpoint || (isLocal && location.port !== bridgePort
@@ -1180,7 +1180,7 @@
           <div class="listen" role="group" aria-labelledby="cv-listen">
             <div class="head"><span id="cv-listen">Listening</span><button class="details btn-sm" type="button" aria-expanded="false">Details</button></div>
             <label class="check"><input type="checkbox" name="overlap"><span>Hear Me While Claude Speaks<small>The mic stays on while Claude talks. Claude's own words are left out of what it hears, so what you say at the same time is kept, and Claude listens until you stop.</small></span></label>
-            <label>End of Your Turn<select name="endPause"><option value="500">0.5 seconds</option><option value="1000">1 second</option><option value="1500">1.5 seconds</option><option value="2500">2.5 seconds</option></select><small>How long a pause in your speaking sends what you said.</small></label>
+            <label>End of Your Turn<select name="endPause"><option value="500">0.5 seconds</option><option value="800">0.8 seconds</option><option value="1000">1 second</option><option value="1500">1.5 seconds</option><option value="2500">2.5 seconds</option></select><small>How long a pause in your speaking sends what you said.</small></label>
             <label class="mic-back">Mic Back After Claude<select name="micBack"><option value="250">0.25 seconds</option><option value="700">0.7 seconds</option><option value="1200">1.2 seconds</option></select><small>With Hear Me While Claude Speaks off, the mic is off while Claude talks and comes back this long after, once the echo has faded.</small></label>
           </div>
           <div class="agent" role="group" aria-labelledby="cv-agent">
@@ -1945,7 +1945,7 @@
 
   // Listening, also in the settings panel (the header's notes): remembered in this browser.
   const LISTEN_KEY = 'claude-voice:listening';
-  const listenOpt = { overlap: true, endPause: 500, micBack: 700 };
+  const listenOpt = { overlap: true, endPause: 800, micBack: 700 };
   try {
     const saved = JSON.parse(localStorage.getItem(LISTEN_KEY) || 'null');
     if (saved) Object.keys(listenOpt).forEach((k) => { if (typeof saved[k] === typeof listenOpt[k]) listenOpt[k] = saved[k]; });
@@ -2037,7 +2037,7 @@
   }
   function stopRecognition() { wantListening = false; if (rec && recRunning) try { rec.abort(); } catch (e) { /* ignore */ } }
 
-  // A pause of listenOpt.endPause (half a second unless changed) without new words means you've finished. The recogniser's
+  // A pause of listenOpt.endPause (0.8 seconds unless changed) without new words means you've finished. The recogniser's
   // own "final" result can lag well behind that, so the pause is timed from the last interim words and acted on without
   // waiting for the final.
   let lastHeard = 0, consumedUpTo = -1; // consumedUpTo: results already acted on from interim text, whose late finals are skipped

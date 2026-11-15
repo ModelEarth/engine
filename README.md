@@ -30,7 +30,7 @@ The script never holds a key. It decides where to send requests based on where t
 
 | Page served from | Requests go to | Answered by |
 |---|---|---|
-| `localhost` / `127.0.0.1` (any port) | `http://127.0.0.1:8790/api/claude-voice` | Local bridge, using the **Claude Code CLI** |
+| `localhost` / `127.0.0.1` (any port) | `http://127.0.0.1:3703/api/claude-voice` | Local bridge, using the **Claude Code CLI** |
 | Anywhere else (Cloudflare) | `/api/claude-voice` on the same site | Worker, using the **Claude API** key |
 
 The same rule covers `wrangler dev`: on `localhost:8787` the page still uses the CLI bridge. You can override the endpoint with `data-endpoint`.
@@ -39,7 +39,7 @@ The same rule covers `wrangler dev`: on `localhost:8787` the page still uses the
 
 - `data-target`: selector of the div to animate. Default: the script's parent div, otherwise `<body>`.
 - `data-endpoint`: explicit API URL.
-- `data-bridge-port`: bridge port. Default `8790`.
+- `data-bridge-port`: bridge port. Default `3703`.
 - `data-lang`: speech language. Default: the page's `lang`, otherwise `en-US`.
 - `data-voice`: part of a voice name, for example `Samantha` or `Google UK English Female`.
 - `data-ui`: `full` (status pill and captions), `minimal` (pill only) or `none`.
