@@ -178,8 +178,15 @@ $(document).on("change"
     }
   }
 
+  // The button reads Choose State until a state is in the hash, then Add State
+  function updateAddStateLabel() {
+    $('#add-state-btn').text(getHash().state ? 'Add State' : 'Choose State');
+  }
+  waitForElm('#add-state-btn').then(updateAddStateLabel);
+
   // Call when state changes
   document.addEventListener('hashChangeEvent', function() {
+    updateAddStateLabel();
     const hash = getHash();
     const currentState = hash.state || '';
     const priorState = window.priorHash?.state || '';
@@ -303,6 +310,10 @@ $(document).on("change"
 </script>
 
 <style>
+/* One width for the page areas (two classes, so it also holds over .content's 1500px at 1600px and up) */
+.content.engineWidth {
+    max-width: 1230px;
+}
 .headerImage{
     display: none;
 }
@@ -439,7 +450,7 @@ tbody tr td:nth-child(2) {
 
 <div style="clear:both; min-height:250px; display:none" class="displayOnload">
 
-  <div class="topcolumns content contentpadding" style="padding-top:0px; padding-bottom:0px; width:100%; max-width:1230px">
+  <div class="topcolumns content contentpadding engineWidth" style="padding-top:0px; padding-bottom:0px; width:100%;">
 
     <div class="pageColumn">
       <div class="pageColumnInside">
@@ -448,7 +459,10 @@ tbody tr td:nth-child(2) {
 
       Choose your location to see which industries are active in your community, which create the most jobs and which have impacts on air, water, energy and health.<br><br>
 
-      <a href="../localsite/info/" class="btn btn-success">Local Industries</a>
+      <!-- Passes the hash's location (state, geo...) forward: HashLinks in ../profile/trade-viz-links.js -->
+      <a id="local-industries-link" href="../localsite/info/" class="btn btn-success">Local Industries</a>
+      <script src="../profile/trade-viz-links.js"></script>
+      <script>HashLinks.pass(document.getElementById("local-industries-link"));</script>
       <!--
       <a href="https://model.earth/community/challenge/">Join our Newsletter</a>
       -->
@@ -494,7 +508,7 @@ tbody tr td:nth-child(2) {
 <div id="readmeDiv"></div>
 
 <div class="hideMobileX">
-  <div class="content contentpadding" style="max-width:1230px; padding-top:0px; padding-bottom:20px;">
+  <div class="content contentpadding engineWidth" style="padding-top:0px; padding-bottom:20px;">
 
       <a href="../nisar/">NISAR</a> &ndash;  The first dual frequency radar imaging satellite tracks earth surface elevation changes with centimeter-level accuracy.<br><br>
 
@@ -510,10 +524,18 @@ tbody tr td:nth-child(2) {
   </div>
 </div>
 
+<!-- Footprint sections from profile/footprint/template-footprint.html, also on profile/footprint/index.html.
+Only the treemap and matrix (#matrixSection) show at first. The menu at their top right shows the other sections. -->
+<div class="content contentpadding engineWidth" style="padding-top:0px; padding-bottom:0px;">
+  <div id="footprintLayout"></div>
+</div>
+<script src="../profile/footprint/js/footprint-layout.js"></script>
+<script>loadFootprintLayout("footprintLayout", { sections: ["matrixSection"] });</script>
+
 
 <div class="backgroundStyle">
 
-<div class="content contentpadding" style="padding-bottom: 0px;">
+<div class="content contentpadding engineWidth" style="padding-bottom: 0px;">
 
   <!-- viz=false to show adjacent text is showing N/A -->
   <div style="position:relative;">
@@ -524,7 +546,7 @@ tbody tr td:nth-child(2) {
   </div>
 
   <div style="padding:20px 0;">
-    <button id="add-state-btn" class="btn" style="margin-top:-34px;padding-bottom:10px;">Add State</button>
+    <button id="add-state-btn" class="btn" style="margin-top:-34px;padding-bottom:10px;">Choose State</button><!-- Add State once a state is in the hash (updateAddStateLabel) -->
   </div>
 
 </div>
@@ -667,7 +689,7 @@ tbody tr td:nth-child(2) {
 </style>
 
 <div class="lite">
-<div id="main-info-contentX" class="content contentpadding" style="clear:both; padding-top:50px;">
+<div id="main-info-contentX" class="content contentpadding engineWidth" style="clear:both; padding-top:50px;">
 
   <div class="floatRight hideMobile" style="border:1px solid #ccc; margin-bottom:0px;">
     <div>
@@ -755,7 +777,7 @@ Learn more about USEEIO.
 
   <!-- logos -->
   <div class="backgroundStyle">
-    <div id="logoRow" class="content contentpadding">
+    <div id="logoRow" class="content contentpadding engineWidth">
 
       <div style="margin-top:10px;margin-bottom:20px" id="logotoprow">
         <div style="float:left; margin-right:40px">
@@ -823,7 +845,7 @@ Learn more about USEEIO.
 <div style="position:relative; height:550px">
   <div id="hero-landscape-image" class="bgimg" style="position: absolute; left:0; right:0; opacity: 0.8; background-color:#888">
 
-      <div class="content contentpadding" style="padding-top:60px">
+      <div class="content contentpadding engineWidth" style="padding-top:60px">
         <div style="float:left; margin-right:30px">
             <div id="hero-rect-new">
               <h3>Project Areas</h3>
@@ -868,7 +890,7 @@ Learn more about USEEIO.
               }
             }
           </script>
-          <div class="local content contentpadding" style="overflow:auto; display:none">
+          <div class="local content contentpadding engineWidth" style="overflow:auto; display:none">
 
             <div id="greatestNeedsHolder" class="resultsHolder" style="margin-right:30px;">
 
