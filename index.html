@@ -536,7 +536,7 @@ Only the treemap and matrix (#matrixSection) show at first. The menu at their to
 
 <div class="backgroundStyle">
 
-<div class="content contentpadding engineWidth" style="padding-bottom: 0px;">
+<div class="content contentpadding engineWidth" style="padding-top: 0px; padding-bottom: 0px;"><!-- The footprint sections above end with their own margin -->
 
   <!-- viz=false to show adjacent text is showing N/A -->
   <div style="position:relative;">
@@ -546,8 +546,8 @@ Only the treemap and matrix (#matrixSection) show at first. The menu at their to
     <div id="iframe-container" style="display:none;"></div>
   </div>
 
-  <div style="padding:20px 0;">
-    <button id="add-state-btn" class="btn" style="margin-top:-34px;padding-bottom:10px;">Choose State</button><!-- Add State once a state is in the hash (updateAddStateLabel) -->
+  <div style="padding:0 0 20px;">
+    <button id="add-state-btn" class="btn" style="padding-bottom:10px;">Choose State</button><!-- Add State once a state is in the hash (updateAddStateLabel) -->
   </div>
 
 </div>
@@ -752,13 +752,14 @@ To start, the challenge asks participants to choose a location of interest – r
 
 <p>
 <a style="font-size:18px" href="../io/">Explore your Community's Impacts</a><br>
-Companies like Amazon and General Motors are using the US Environmentally Extended Input-Output <a href="https://www.epa.gov/land-research/us-environmentally-extended-input-output-useeio-models">(USEEIO) Models</a> to analyze economic and environmental impacts across all economic sectors. The model is available for community planning, business development and environmental education through our <a href="../../localsite/info/">Local Industry Comparison Tools</a><br>
+<!-- https://www.epa.gov/land-research/us-environmentally-extended-input-output-useeio-models -->
+Companies like Amazon and General Motors are using the Cornerstone Environmentally Extended Input-Output <a href="https://cornerstonedata.org/data/eeio">(EEIO) Models</a> to analyze economic and environmental impacts across economic sectors. The model is available for planning, development and education through our <a href="../../localsite/info/">Industry Comparison Tools</a><br>
 
 </p>
 
 <p>
 <a href="../io/learn/" style="font-size:18px">Tools for Research and Teaching</a><br>
-  Using an economy-wide input-output model of industries, households and the environment, the new online tools help communities identify opportunities for both economic growth and environmental sustainability.
+  Using an economy-wide input-output model of industries, households and the environment, the online tools help communities identify opportunities for both economic growth and environmental sustainability.
 
 </p>
 
@@ -851,6 +852,9 @@ By looking at a product's entire life cycle, we can find new opportunities to re
   border-radius: 4px;
   border: none !important;
   overflow: visible !important;
+}
+.state-iframe-wrapper:last-child {
+  margin-bottom: 16px; /* Above the Add State button */
 }
 /* DataUSA state header: the state menu and the remove button (updateDataUSAIframe), with dark mode */
 .state-iframe-header {
@@ -945,9 +949,8 @@ By looking at a product's entire life cycle, we can find new opportunities to re
               <a href="https://model.earth/country-data/map/">3D Globe</a> - MapBox<br>
               <a href="https://echarts.apache.org/examples/en/index.html#chart-type-globe">3D Globe</a> - Apache eCharts<br>
               -->
-              <a href="../../io/charts/">React/D3</a> - Inflow-Outflow Charts<br>
               <a href="../../data-pipeline">Data Pipeline</a> - Data Sources and Integrations<br>
-              <a href="../../realitystream/">Python</a> - Machine Learning<br>
+              <a href="../../realitystream/models/">Predictive Models</a> - Machine Learning<br>
               <a href="https://model.earth/community/projects/#ux">UX/UI</a> - Nutrition Labels / Scenario Reporting<br>
               <a href="/io/coders/" style="display:block;margin-top:10px">Weekly Coding Meetups</a>
               
