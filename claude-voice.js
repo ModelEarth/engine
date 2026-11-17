@@ -25,6 +25,9 @@
  *                      The controls (.claude-voice-ui) carry a data-open attribute while anything shows above their row
  *                      (captions, the typing box, settings or the opened play pill), so the page can make room for it.
  *   data-idle-timeout  seconds of silence before a conversation ends on its own (default 120)
+ *   data-agent-name    the agent's name as shown, or a comma-separated list ("Little Bird, Sparrow") whose first is shown
+ *                      ("Say “Ok Little Bird”") and any of which starts a conversation (default Claude). localsite.js
+ *                      sets it from agent_name in the site's support/site/config.yaml entry.
  *   data-play-button   CSS selector of a page button (such as the Earth map's play button) to move to the right end of the
  *                      controls. Hovering over it shows Audio and Motion toggles above it, in one pill with it. During a
  *                      conversation (and while Claude is paused), a click on it pauses or resumes Claude's voice, motion and
@@ -95,6 +98,13 @@
     micLevel: ds.micLevel !== 'false',
     maxHistory: 24,
   };
+  // The agent's names: data-agent-name, a comma-separated list (agent_name in the site's entry in support/site/config.yaml,
+  // passed by localsite.js), such as "Little Bird, Sparrow". The first is the name shown ("Say “Ok Little Bird”") and any
+  // of them starts a conversation. Claude without one. ClaudeVoice.setNames() changes them once the widget is up.
+  const parseNames = (v) => String(v || '').split(',').map((n) => n.trim()).filter(Boolean);
+  let agentNames = parseNames(ds.agentName);
+  if (!agentNames.length) agentNames = ['Claude'];
+  const shownName = () => agentNames[0];
 
   const reducedMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
   const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -977,7 +987,7 @@
 
   // ------------------------------------------------------------------ UI (shadow DOM so page CSS never collides)
   function UI(host, actions) {
-    if (cfg.ui === 'none') return { setState() {}, user() {}, claude() {}, extras() {}, important() {}, note() {}, fade() {}, showInput() {}, askPassphrase() {}, setVoices() {}, setVoiceMode() {}, setVoiceInfo() {}, setTextOutput() {}, setListening() {}, setPaused() {}, setAgent() {}, addInput() {}, hideText() {}, boxes: () => [], play: null };
+    if (cfg.ui === 'none') return { setState() {}, user() {}, claude() {}, extras() {}, important() {}, note() {}, fade() {}, showInput() {}, askPassphrase() {}, setVoices() {}, setVoiceMode() {}, setVoiceInfo() {}, setTextOutput() {}, setListening() {}, setPaused() {}, setAgent() {}, addInput() {}, hideText() {}, rename() {}, boxes: () => [], play: null };
     let play = ds.playButton ? document.querySelector(ds.playButton) : null;
     const el = document.createElement('div');
     el.className = 'claude-voice-ui';
@@ -1447,7 +1457,20 @@
       if (!path.includes(menu) && !path.includes(dots)) showMenu(null);
     }, true);
     menu.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); showMenu(null); dots.focus(); } });
+    // Where the controls name the agent (Claude, as written above): text, and title, label and placeholder attributes.
+    // rename() puts the agent's shown name there (shownName), kept from these originals so it can change again.
+    const nameSpots = [];
+    {
+      const walk = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+        if (n.nodeType === Node.TEXT_NODE) { if (/\bClaude\b/.test(n.data) && n.parentNode.nodeName !== 'STYLE') nameSpots.push({ n, text: n.data }); continue; }
+        for (const a of ['title', 'aria-label', 'placeholder']) { const v = n.getAttribute(a); if (v && /\bClaude\b/.test(v)) nameSpots.push({ n, a, text: v }); }
+      }
+    }
     return {
+      rename(name) {
+        for (const spot of nameSpots) { const v = spot.text.replace(/\bClaude\b/g, name); if (spot.a) spot.n.setAttribute(spot.a, v); else spot.n.data = v; }
+      },
       setState(s, text) { wrap.dataset.s = s; label.textContent = text; },
       user(t) { userCap.textContent = t ? `“${t}”` : ''; },
       /** aside: a line of the widget's own, such as the farewell, which the menu's Expand doesn't bring back.
@@ -1509,7 +1532,7 @@
       },
       setPaused(audio, motion, listening) {
         toggleLabel(audioBtn, audio, 'voice'); toggleLabel(motionBtn, motion, 'motion');
-        const held = audio || motion || listening, t = held ? 'Resume Claude' : 'Pause Claude';
+        const held = audio || motion || listening, t = `${held ? 'Resume' : 'Pause'} ${shownName()}`;
         // While paused, the Conversation box shows (even with Important Text off), so its ⋯ menu can be reached.
         importantCap.classList.toggle('pinned', held);
         importantCap.hidden = !held && !importantText.textContent;
@@ -1530,9 +1553,16 @@
   }
 
   // ------------------------------------------------------------------ phrases
-  const AGENT_NAME = '(?:claude|claud|clawed|cloud|clode|clyde|klaud|cloudy|claudia|georgia|sade|sha[\\s-]?day|shaa[\\s-]?day|izzy|izzie|sparrow|little\\s+bird|senara|senera)';
-  const WAKE_RE = new RegExp(`\\b(?:ok(?:ay)?|o\\.?\\s?k\\.?)[\\s,.!]+${AGENT_NAME}\\b[\\s,.!?:]*`, 'i');
-  const THANKS_RE = new RegExp(`(?:^|\\b)(?:thanks|thank\\s+you|thank\\s+u|thx|cheers)(?:\\s+(?:so\\s+much|very\\s+much|a\\s+lot|again|${AGENT_NAME}))*[\\s.!,]*$`, 'i');
+  const KNOWN_NAMES = '(?:claude|claud|clawed|cloud|clode|clyde|klaud|cloudy|claudia|georgia|sade|sha[\\s-]?day|shaa[\\s-]?day|izzy|izzie|sparrow|little\\s+bird|senara|senera)';
+  // Any of the agent's names (agentNames) wakes it too, along with the names it's often heard as (KNOWN_NAMES).
+  let WAKE_RE, THANKS_RE;
+  function nameRes() {
+    const own = agentNames.map((n) => n.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+'));
+    const AGENT_NAME = `(?:${[KNOWN_NAMES, ...own].join('|')})`;
+    WAKE_RE = new RegExp(`\\b(?:ok(?:ay)?|o\\.?\\s?k\\.?)[\\s,.!]+${AGENT_NAME}\\b[\\s,.!?:]*`, 'i');
+    THANKS_RE = new RegExp(`(?:^|\\b)(?:thanks|thank\\s+you|thank\\s+u|thx|cheers)(?:\\s+(?:so\\s+much|very\\s+much|a\\s+lot|again|${AGENT_NAME}))*[\\s.!,]*$`, 'i');
+  }
+  nameRes();
   const FAREWELLS = ["You're welcome.", 'Any time.', 'Happy to help.', 'My pleasure.'];
   function isThanks(text) {
     const m = text.match(THANKS_RE);
@@ -1564,9 +1594,9 @@
   // project/goals has CHROME_SPEECH (true) to say whether Chrome is asked for spoken answers and suggested for them.
   const isBrave = !!navigator.brave;
   const SR = isBrave ? null : (window.SpeechRecognition || window.webkitSpeechRecognition);
-  const NO_SR_NOTE = isBrave
-    ? 'Brave blocks the speech recognition this needs. Use Chrome, Edge or Safari to talk, or type to Claude here.'
-    : 'This browser has no speech recognition (try Chrome, Edge or Safari). You can type to Claude instead.';
+  const noSrNote = () => (isBrave
+    ? `Brave blocks the speech recognition this needs. Use Chrome, Edge or Safari to talk, or type to ${shownName()} here.`
+    : `This browser has no speech recognition (try Chrome, Edge or Safari). You can type to ${shownName()} instead.`);
   const tts = window.speechSynthesis;
   let rec = null, wantListening = false, recRunning = false, restartDelay = 250, networkErrors = 0;
   let mode = 'off';            // off | wake | listening | thinking | speaking
@@ -1647,7 +1677,7 @@
     emit('state', { state: m });
   }
 
-  const LABELS = { off: 'Enable voice', wake: SR ? 'Say “Ok Claude”' : 'Type to start', listening: 'Listening… say “Thanks” to finish', thinking: 'Thinking…', speaking: 'Speaking… tap to interrupt', error: 'Voice unavailable' };
+  const LABELS = { off: 'Enable voice', get wake() { return SR ? `Say “Ok ${shownName()}”` : 'Type to start'; }, listening: 'Listening… say “Thanks” to finish', thinking: 'Thinking…', speaking: 'Speaking… tap to interrupt', error: 'Voice unavailable' };
   function showState() { ui.setState(mode, listenPaused && SR && mode !== 'off' && mode !== 'error' ? 'Listening paused' : LABELS[mode] || mode); }
 
   // --- pausing: Claude's voice holds mid-word (and later replies wait), and its motion freezes, until resumed. The pause
@@ -1689,7 +1719,7 @@
     if (!ownPlay || icon.textContent !== ownPlay.icon || btn.title !== ownPlay.title) pagePlay = { icon: icon.textContent, title: btn.title, label: btn.getAttribute('aria-label') };
     if (playForClaude()) {
       const held = audioPaused || motionPaused || listenPaused;
-      ownPlay = { icon: held ? 'play_arrow' : 'pause', title: held ? 'Resume Claude' : 'Pause Claude' };
+      ownPlay = { icon: held ? 'play_arrow' : 'pause', title: `${held ? 'Resume' : 'Pause'} ${shownName()}` };
       icon.textContent = ownPlay.icon; btn.title = ownPlay.title; btn.setAttribute('aria-label', ownPlay.title);
     } else if (ownPlay) {
       ownPlay = null;
@@ -2024,7 +2054,7 @@
           wantListening = false; setMode('error'); ui.note('No microphone was found. Connect one, then tap the button. You can also type.', 12000); ui.showInput();
         } else if (e.error === 'network') {
           // A few in a row with nothing heard means the speech service is unreachable, not a blip.
-          if (++networkErrors >= 3) { wantListening = false; setMode('error'); ui.note('Speech recognition can’t reach its service in this browser. Try Chrome, Edge or Safari, or type to Claude here.', 12000); ui.showInput(); }
+          if (++networkErrors >= 3) { wantListening = false; setMode('error'); ui.note(`Speech recognition can’t reach its service in this browser. Try Chrome, Edge or Safari, or type to ${shownName()} here.`, 12000); ui.showInput(); }
           else restartDelay = Math.min(8000, restartDelay * 2);
         }
       };
@@ -2241,7 +2271,7 @@
   function resetIdle() {
     clearTimeout(idleTimer);
     if (listenPaused) return; // started again on resume
-    idleTimer = setTimeout(() => { if (mode === 'listening') { ui.note('Conversation ended after a quiet spell. Say “Ok Claude” to start again.', 6000); endConversation(false); } }, cfg.idleTimeout);
+    idleTimer = setTimeout(() => { if (mode === 'listening') { ui.note(`Conversation ended after a quiet spell. Say “Ok ${shownName()}” to start again.`, 6000); endConversation(false); } }, cfg.idleTimeout);
   }
 
   // --- Places: a request naming a US state, a country or a county goes into the page's hash with localsite's goHash(),
@@ -2496,7 +2526,7 @@
           try { localStorage.removeItem(PASS_SET_KEY); } catch (e) { /* storage blocked */ }
           lockedText = asked && asked.role === 'user' ? asked.content : '';
           ui.askPassphrase();
-        } else enqueueSpeech('Sorry, I couldn’t reach Claude just then.');
+        } else enqueueSpeech(`Sorry, I couldn’t reach ${shownName()} just then.`);
       }
     } finally {
       if (abortCtl === ctl) abortCtl = null;
@@ -2613,18 +2643,30 @@
     if (voice) u.voice = voice;
     u.lang = (voice && voice.lang) || cfg.lang; u.rate = 1.02; u.pitch = 1;
     u.onboundary = (ev) => { if (ev.name === 'word' || ev.name === undefined) scene.pulse(0.06 + 0.12 * (scene.state.energy || 0)); };
-    u.onstart = () => { voiceBlockNoted = false; scene.pulse(0.15); echoSpoken(spoken); };
-    u.onend = finish;
+    let begun = false, nudges = 0, nudgeTimer;
+    u.onstart = () => { begun = true; clearTimeout(nudgeTimer); voiceBlockNoted = false; scene.pulse(0.15); echoSpoken(spoken); };
+    u.onend = () => { clearTimeout(nudgeTimer); finish(); };
     u.onerror = (e) => {
       // Browsers refuse to speak ("not-allowed") until the page has had a click or key press, and when the site's
       // Autoplay setting blocks sound. Without this note the reply would go by in silence.
       if (e.error === 'not-allowed' && !voiceBlockNoted) {
         voiceBlockNoted = true;
-        ui.note(`${isBrave ? 'Brave' : 'Your browser'} blocked Claude’s voice. Click anywhere on the page, or allow Autoplay for this site in the site settings (left of the address).`, 15000);
+        ui.note(`${isBrave ? 'Brave' : 'Your browser'} blocked ${shownName()}’s voice. Click anywhere on the page, or allow Autoplay for this site in the site settings (left of the address).`, 15000);
       }
+      clearTimeout(nudgeTimer);
       finish();
     };
     tts.speak(u);
+    // Chrome can hold a sentence in its queue without speaking it, often the first reply on a newly loaded page, until its
+    // speech is paused and resumed, as turning the voice toggle off and on does. So a sentence that hasn't started within
+    // a second (with the voice on) is nudged that way, up to three times, a second apart.
+    if (!audioPaused) tts.resume();
+    const nudge = () => {
+      if (begun || finished || speaking !== item || nudges >= 3) return;
+      if (!audioPaused) { nudges++; tts.pause(); tts.resume(); }
+      nudgeTimer = setTimeout(nudge, 1000);
+    };
+    nudgeTimer = setTimeout(nudge, 1000);
   }
   function afterSpeech() {
     wordField.finish();
@@ -2661,7 +2703,7 @@
     if (mode !== 'off' && mode !== 'error') return;
     if (!SR) {
       setMode('wake');
-      ui.note(NO_SR_NOTE, 10000);
+      ui.note(noSrNote(), 10000);
       ui.showInput();
       return;
     }
@@ -2674,6 +2716,16 @@
     interrupt(); stopRecognition(); clearTimeout(idleTimer);
     setMode('off'); scene.applyMood(MOODS.idle);
   }
+
+  // The agent's names (agentNames): shown in the controls, and listened for. Empty goes back to Claude.
+  function setNames(list) {
+    agentNames = parseNames(Array.isArray(list) ? list.join(',') : list);
+    if (!agentNames.length) agentNames = ['Claude'];
+    nameRes();
+    ui.rename(shownName());
+    ui.setPaused(audioPaused, motionPaused, listenPaused); showState(); syncPlayButton();
+  }
+  if (shownName() !== 'Claude') ui.rename(shownName());
 
   setMode('off');
   if (cfg.autostart && SR && navigator.permissions && navigator.permissions.query) {
@@ -2695,6 +2747,9 @@
     ask: (question, context) => askAloud(question, context),
     /** Show the typing box and put the cursor in it, for an answer typed rather than spoken. */
     focusInput: () => ui.showInput(true),
+    /** The agent's names, as a list or comma-separated ("Little Bird, Sparrow"): the first is shown, and any starts a conversation. Empty for Claude. */
+    setNames,
+    get names() { return agentNames.slice(); },
     /** Closes the typing box and the captions, such as for a page's panel opening where they show. */
     hideText: () => ui.hideText(),
     /** Whether this browser can hear speech (not Brave, which turns the service off, and not one without it). */

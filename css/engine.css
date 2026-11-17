@@ -1,0 +1,101 @@
+/* Shared layout for pages with the voice widget (engine/claude-voice.js) in a #fullscreen div,
+   such as project/goals and project/care. Load it after localsite/css/base.css and before the
+   page's own CSS, which can override it. */
+
+/* #fullscreen: fixed over the whole window, behind the localsite header and search filters, so
+   it stays in place as the page scrolls over it. It holds the voice widget's canvas, floating words
+   and controls, and on project/goals its hero photos and the Earth map (localsite's placeEarthDisplay()).
+   It has no z-index of its own, so what's in it keeps its place in the page's stacking order. */
+html #fullscreen { position: fixed; inset: 0; height: auto; box-sizing: border-box; }
+/* The page's search filters (#filterFieldsHolder, until they're fixed with their own z-index) are
+   raised above it. */
+#filterFieldsHolder:not(.filterFieldsHolderFixed) { position: relative; z-index: 3; }
+/* The Earth map's stack of circles in the upper right (zoom + and -, the close-X and the scroll circle, placed 22px
+   down by base.css) goes 22px below the header, since #fullscreen's top is behind it: --header-h where the page
+   sets it (project/goals: where #goalsPage starts), else the header's height (--headerbar-offset, localsite.js).
+   Not below the search filters too (--top-nav-offset), which sit at the left, leaving the right side clear. */
+html #fullscreen > #mainEarthDisplay .earth-zoom-controls { top: calc(var(--header-h, var(--headerbar-offset, 0px)) + 22px) !important; }
+/* The localsite footer (#main-footer, position: relative) slides up over the fixed #fullscreen at
+   the page's bottom edge. It's raised above the Earth map, its play button (z-index 102, base.css)
+   and the voice controls, so they're covered there too. */
+#main-footer { position: relative; z-index: 103; }
+
+/* .over-fullscreen: page content that scrolls over #fullscreen, which comes before it. Its empty
+   space lets clicks through to the voice controls beneath, while its children take them. At least
+   the window's height below the header, so the footer starts below the fold. */
+.over-fullscreen { position: relative; box-sizing: border-box; min-height: calc(100vh - var(--top-nav-offset, 0px)); pointer-events: none; }
+.over-fullscreen > * { pointer-events: auto; }
+/* A talk circle's area (.talk-circle-area, below) in .over-fullscreen fills the rest of the first screen, with the
+   circle centered in it, along with what's stacked below it (project/care: the title). */
+.over-fullscreen:has(> .talk-circle-area) { display: flex; flex-direction: column; }
+.over-fullscreen > .talk-circle-area { flex: 1; min-height: 0; pointer-events: none; }
+/* .after-fullscreen: content after the first screen (.over-fullscreen), which scrolls up over #fullscreen too. */
+.after-fullscreen { position: relative; }
+
+/* Talk circle (engine/js/talk-circle.js): a see-through circle with one brief question in large type, its padding
+   a share of its diameter (--talk-d), so its text stays well inside the circle. Its two rings
+   pulse slowly, one swelling and one rippling outward, while the words stay still. A slight dark wash inside keeps
+   the white words readable on any background. The ring's color and pace follow the voice widget: blue-teal and slow
+   while waiting, mint while listening, violet while thinking, rose while Claude speaks.
+   .talk-circle-area holds it, centered, unless the page positions the area (project/goals: fixed above its tabs). */
+.talk-circle-area { display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
+/* The circle's slot (talk-circle.js): the circle's full size, so the circle shrinks and moves inside it while what
+   else is in the area, stacked below it, stays put. Hidden (talk-circle.js place) hides the circle only, keeping its
+   size, so it can be sized to fit before it shows. */
+.talk-circle-slot { flex: none; display: flex; align-items: center; justify-content: center; width: var(--talk-d, 400px); height: var(--talk-d, 400px); }
+.talk-circle-area[hidden] { display: flex; }
+.talk-circle-area[hidden] > .talk-circle-slot { visibility: hidden; }
+.talk-circle {
+  --talk-ring: rgba(150, 215, 255, 0.75); --talk-glow: rgba(90, 170, 255, 0.35); --talk-pace: 6s;
+  pointer-events: auto; position: relative; box-sizing: border-box; flex: none;
+  width: var(--talk-d, 400px); height: var(--talk-d, 400px); padding: calc(var(--talk-d, 400px) * 0.16); border-radius: 50%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.7em;
+  font: inherit; color: #fff; text-align: center; cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: radial-gradient(circle, rgba(8, 14, 26, 0.42) 0%, rgba(8, 14, 26, 0.30) 55%, rgba(8, 14, 26, 0.12) 72%, rgba(255, 255, 255, 0.06) 100%);
+  -webkit-backdrop-filter: blur(1.5px); backdrop-filter: blur(1.5px);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6), 0 0 18px rgba(0, 0, 0, 0.45);
+}
+.talk-circle::before, .talk-circle::after {
+  content: ""; position: absolute; inset: -1px; border-radius: 50%; pointer-events: none;
+  border: 2px solid var(--talk-ring);
+  box-shadow: 0 0 40px 6px var(--talk-glow), inset 0 0 40px 4px var(--talk-glow);
+  transition: border-color 1.2s ease, box-shadow 1.2s ease;
+  animation: talk-circle-swell var(--talk-pace) ease-in-out infinite;
+}
+.talk-circle::after { box-shadow: 0 0 24px 2px var(--talk-glow); animation-name: talk-circle-ripple; animation-timing-function: ease-out; }
+.talk-circle[data-state="listening"] { --talk-ring: rgba(140, 240, 200, 0.9); --talk-glow: rgba(70, 220, 160, 0.40); --talk-pace: 2.6s; }
+.talk-circle[data-state="thinking"] { --talk-ring: rgba(195, 170, 255, 0.85); --talk-glow: rgba(150, 115, 255, 0.38); --talk-pace: 3.4s; }
+.talk-circle[data-state="speaking"] { --talk-ring: rgba(255, 180, 205, 0.85); --talk-glow: rgba(255, 120, 170, 0.36); --talk-pace: 3s; }
+.talk-circle:focus-visible { outline: 3px solid #fff; outline-offset: 8px; }
+/* While the voice widget's large words show, the circle shrinks to 40% and glides to a clear spot
+   (talk-circle.js setSmall: --talk-dx and --talk-dy move it from its place), with just the start of
+   the next question. */
+.talk-circle { transition: width 0.9s ease, height 0.9s ease, transform 1.2s ease; }
+.talk-circle.talk-circle-small {
+  width: calc(var(--talk-d, 400px) * 0.4); height: calc(var(--talk-d, 400px) * 0.4); padding: calc(var(--talk-d, 400px) * 0.04);
+  transform: translate(var(--talk-dx, 0px), var(--talk-dy, 0px));
+}
+.talk-circle-small .talk-circle-question { font-size: 21px; }
+.talk-circle-small .talk-circle-hint, .talk-circle-small .talk-circle-links { display: none; }
+@keyframes talk-circle-swell { 0%, 100% { transform: scale(1); opacity: 0.7; } 50% { transform: scale(1.035); opacity: 1; } }
+@keyframes talk-circle-ripple { 0% { transform: scale(1); opacity: 0.55; } 100% { transform: scale(1.16); opacity: 0; } }
+.talk-circle-question { font-size: clamp(24px, calc(var(--talk-d, 400px) * 0.075), 34px); line-height: 1.22; font-weight: 600; letter-spacing: -0.005em; }
+.talk-circle-hint { font-size: clamp(17px, calc(var(--talk-d, 400px) * 0.042), 20px); line-height: 1.3; color: rgba(255, 255, 255, 0.9); white-space: pre-line; }
+/* Balanced lines, so neither leaves a word alone on its last line. */
+.talk-circle-question, .talk-circle-hint { text-wrap: balance; }
+.talk-circle-hint:empty, .talk-circle-links:empty { display: none; }
+/* Links to the page where Claude can answer, below the hint when the voice widget isn't loaded (talk-circle.js showLinks). */
+.talk-circle-links { margin-top: -0.3em; font-size: 16px; line-height: 1.4; color: rgba(255, 255, 255, 0.85); text-wrap: balance; }
+.talk-circle-links a { color: #fff; text-decoration: underline; text-underline-offset: 2px; }
+.talk-circle-links a:hover, .talk-circle-links a:focus-visible { color: rgba(170, 225, 255, 1); }
+/* .talk-circle-hide: what fades away while a conversation from the circle is on (talk-circle.js setTalking), such as
+   project/care's title, and comes back once it ends. */
+.talk-circle-hide { transition: opacity 0.8s ease, visibility 0.8s; }
+html.talk-circle-talking .talk-circle-hide { opacity: 0; visibility: hidden; }
+@media (prefers-reduced-motion: reduce) {
+  .talk-circle-hide { transition: none; }
+  .talk-circle { transition: none; }
+  .talk-circle::before, .talk-circle::after { animation: none; }
+  .talk-circle::after { display: none; }
+}
