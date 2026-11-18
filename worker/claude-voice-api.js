@@ -17,6 +17,11 @@
 //   CLAUDE_MODEL       (optional, default claude-opus-5-5)
 //   GEMINI_MODEL       (optional, default gemini-flash-latest)
 //   ALLOWED_ORIGINS    (optional, comma-separated; default = same origin only)
+//   AI                 (Workers AI binding, optional): speech to text for browsers whose own speech input is missing or
+//                      blocked, such as Brave and Firefox. .../status tells the page it's there, and .../transcribe turns
+//                      each spoken turn (a 16 kHz WAV) into text with Whisper (TRANSCRIBE_MODEL), as the local bridge does
+//                      with whisper.cpp. Bind it in wrangler: [ai] binding = "AI" (wrangler.toml) or "ai": { "binding": "AI" }.
+//                      Like a conversation, it needs the team passphrase when one is set, or the visitor's own key.
 //   TEAM_PASSPHRASE    (secret, optional): when set, each request needs it (shared/passphrase.js). claude-voice.js
 //                      asks for it on a 401 and trades it at /api/team-passphrase for a cookie page scripts can't
 //                      read (handleTeamPassphrase there), so only people given it use the key.
@@ -35,6 +40,10 @@ import { streamOpenAICompat } from '../shared/openai-compat.js';
 import { PASSPHRASE_HEADER, passphraseRefusal } from '../shared/passphrase.js';
 
 export const CLAUDE_VOICE_PATH = '/api/claude-voice';
+// The conversation at CLAUDE_VOICE_PATH, plus .../status and .../transcribe under it
+export const isClaudeVoicePath = (path) => path === CLAUDE_VOICE_PATH || path.startsWith(CLAUDE_VOICE_PATH + '/');
+const TRANSCRIBE_MODEL = '@cf/openai/whisper-large-v3-turbo';
+const TRANSCRIBE_MAX_BYTES = 4_000_000; // A turn is at most 30 seconds, about 1 MB as a 16 kHz WAV
 // The /keys page's provider ids (keys/providers.js) this endpoint can answer with, given the visitor's own key: name
 // (in messages), who (in the prompt, standing in for Claude), and for OpenAI-style services their chat URL and a quick
 // model suited to speech. The page's other providers (images, 3D, voices, search, data) can't hold a conversation.
@@ -60,12 +69,51 @@ function corsHeaders(request, env) {
   return { ok: false, headers: {} };
 }
 
+// .../status: what this Worker offers the page (claude-voice.js checkAgent). worker: true, since it has no view of
+// running replies as the local bridge does.
+function voiceStatus(env, cors) {
+  const transcribe = env.AI ? { name: 'Whisper on Cloudflare', model: TRANSCRIBE_MODEL.split('/').pop(), local: false } : null;
+  return Response.json({ worker: true, transcribe }, { headers: { ...cors, 'cache-control': 'no-store' } });
+}
+
+// .../transcribe?lang=en-US: a spoken turn as a WAV, back as { text } (or { error }).
+async function voiceTranscribe(request, env, cors, required) {
+  if (!env.AI) return Response.json({ error: 'Speech to text isn’t set up on this site (the Worker’s AI binding).' }, { status: 501, headers: cors });
+  const ownName = String(request.headers.get('x-provider-name') || '').trim();
+  const own = String(request.headers.get('x-provider-key') || '').trim() && OWN_PROVIDERS[ownName];
+  if (!own) {
+    const refusal = await passphraseRefusal(request, env, { required, to: 'talk' });
+    if (refusal) return Response.json({ error: refusal.error, passphrase: refusal.passphrase }, { status: refusal.status, headers: cors });
+  }
+  if (env.CLAUDE_VOICE_LIMITER) {
+    const { success } = await env.CLAUDE_VOICE_LIMITER.limit({ key: request.headers.get('cf-connecting-ip') || 'anon' });
+    if (!success) return Response.json({ error: 'Too many requests' }, { status: 429, headers: cors });
+  }
+  const wav = new Uint8Array(await request.arrayBuffer());
+  if (!wav.length || wav.length > TRANSCRIBE_MAX_BYTES) return Response.json({ error: wav.length ? 'That recording is too long.' : 'No recording was sent.' }, { status: 400, headers: cors });
+  let b64 = '';
+  for (let i = 0; i < wav.length; i += 0x8000) b64 += String.fromCharCode(...wav.subarray(i, i + 0x8000));
+  const lang = (new URL(request.url).searchParams.get('lang') || '').split('-')[0].toLowerCase();
+  try {
+    const out = await env.AI.run(TRANSCRIBE_MODEL, { audio: btoa(b64), ...(/^[a-z]{2}$/.test(lang) && { language: lang }), vad_filter: true });
+    // Whisper writes sounds as [Music] or (coughs), as the local bridge also leaves out (cleanText)
+    const text = String(out?.text || '').replace(/\[[^\]]*\]|\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+    return Response.json({ text, via: 'Whisper on Cloudflare' }, { headers: { ...cors, 'cache-control': 'no-store' } });
+  } catch (err) {
+    return Response.json({ error: `Whisper on Cloudflare couldn’t turn it into text: ${err.message || err}` }, { status: 502, headers: cors });
+  }
+}
+
 export async function handleClaudeVoice(request, env, ctx, { passphrase: required = false, tools = null } = {}) {
   const { ok, headers: cors } = corsHeaders(request, env);
   if (!ok) return new Response('Origin not allowed', { status: 403 });
+  const path = new URL(request.url).pathname;
+  if (path === CLAUDE_VOICE_PATH + '/status' && request.method === 'GET') return voiceStatus(env, cors);
+  if (path === CLAUDE_VOICE_PATH + '/transcribe' && request.method === 'POST') return voiceTranscribe(request, env, cors, required);
+  if (path !== CLAUDE_VOICE_PATH && request.method !== 'OPTIONS') return Response.json({ error: 'Not found' }, { status: 404, headers: cors });
 
   if (request.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: { ...cors, 'access-control-allow-methods': 'POST, OPTIONS', 'access-control-allow-headers': `content-type, ${PASSPHRASE_HEADER}, x-provider-name, x-provider-key`, 'access-control-max-age': '600' } });
+    return new Response(null, { status: 204, headers: { ...cors, 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-headers': `content-type, ${PASSPHRASE_HEADER}, x-provider-name, x-provider-key`, 'access-control-max-age': '600' } });
   }
   if (request.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: cors });
 
@@ -160,7 +208,7 @@ export async function handleClaudeVoice(request, env, ctx, { passphrase: require
 
 export default {
   async fetch(request, env, ctx) {
-    if (new URL(request.url).pathname === CLAUDE_VOICE_PATH) return handleClaudeVoice(request, env, ctx);
+    if (isClaudeVoicePath(new URL(request.url).pathname)) return handleClaudeVoice(request, env, ctx);
     if (env.ASSETS) return env.ASSETS.fetch(request);
     return new Response('Not found', { status: 404 });
   },

@@ -18,6 +18,8 @@
     // Send the API path to the Worker before asset matching.
     "run_worker_first": ["/api/*"]
   },
+  // Speech to text (Whisper) for browsers without working speech input, such as Brave: /api/claude-voice/transcribe
+  "ai": { "binding": "AI" },
   "vars": {
     "CLAUDE_MODEL": "claude-opus-5-5"
     // "ALLOWED_ORIGINS": "https://www.example.com,https://example.com"
