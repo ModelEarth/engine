@@ -2160,7 +2160,13 @@
       };
       rec.onend = () => {
         recRunning = false;
-        if (wantListening && !micHeld && !listenPaused && !viaBridgeStt) setTimeout(() => { if (wantListening && !recRunning && !micHeld && !listenPaused && !viaBridgeStt) { try { rec.start(); } catch (e) { /* already starting */ } } }, restartDelay);
+        if (wantListening && !micHeld && !listenPaused && !viaBridgeStt) {
+          setTimeout(() => {
+            if (wantListening && !recRunning && !micHeld && !listenPaused && !viaBridgeStt) {
+              try { rec.start(); } catch (e) { /* already starting */ }
+            }
+          }, restartDelay);
+        }
       };
     }
     try { rec.start(); } catch (e) { /* already running */ }
