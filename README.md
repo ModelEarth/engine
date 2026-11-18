@@ -75,6 +75,25 @@ How the bridge runs each turn:
 - To skip the CLI entirely, set `LOCAL_BACKEND=api`.
 - Only localhost origins may call the bridge.
 
+### Speech to text for browsers without working speech input
+
+Brave, Firefox and iOS browsers other than Safari have no speech input, and Chrome's sometimes hears nothing. For these, the widget can record what you say and send it to the bridge, which turns it into text. Each turn ends at a pause and goes to `POST /api/claude-voice/transcribe` as a 16 kHz WAV. The text then goes to `claude -p` like any spoken turn.
+
+- **Automatic (default):** the widget uses the browser's own speech input. It switches to the bridge when that's missing or fails: "service-not-allowed", repeated "network" errors, or nothing ever heard during a conversation. Speech to Text in the settings panel's Listening section can also be set to Browser or Bridge.
+- **When it listens:** not while Claude speaks or thinks. To start, you say "Ok Claude" when the transcriber runs on this computer. With a cloud service, a tap starts the conversation instead, so audio isn't sent to the cloud all the time.
+
+The bridge picks a transcriber when it starts (`TRANSCRIBE=auto`), and its log says which:
+
+- **whisper.cpp on this computer.** Run `brew install whisper-cpp`, then download a model:
+  ```bash
+  mkdir -p ~/.cache/whisper.cpp && curl -L -o ~/.cache/whisper.cpp/ggml-base.en.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+  ```
+  `WHISPER_CLI` and `WHISPER_MODEL` override where they're looked for.
+- **A cloud service:** an OpenAI-compatible `/audio/transcriptions` endpoint, used when there's no whisper.cpp. It needs `OPENAI_API_KEY`, or `TRANSCRIBE_API_KEY` with `TRANSCRIBE_URL` for another service such as Groq. `TRANSCRIBE_MODEL` defaults to `gpt-4o-mini-transcribe`.
+- `TRANSCRIBE=whisper`, `cloud` or `off` forces one choice.
+
+The deployed Worker has no transcriber, so there the widget uses the browser's speech input or typing, as before.
+
 ## Cloudflare (wrangler)
 
 1. Copy `worker/wrangler.example.jsonc` to the folder above your webroot as `wrangler.jsonc`, and adjust the paths.

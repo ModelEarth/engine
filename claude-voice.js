@@ -74,6 +74,8 @@
  * the ⋯ menu have their own light bulbs. Choosing a conversation brings back the mood of its last reply (the colors
  * and motion), and a reply's light bulb brings back that reply's mood.
  * API: window.ClaudeVoice.{start, stop, say, ask, focusInput, hideText, end, interrupt, setMood, clearWords, pauseAudio, pauseMotion, openKeys, on}
+ * Events (claude-voice:<type> on the widget's host, or ClaudeVoice.on(type)): state, start, reply, mood, end, and pause
+ * ({ audio, motion, listening }: which are paused, after the pause button or a change to listening's pause).
  */
 (function () {
   'use strict';
@@ -999,7 +1001,7 @@
       <style>
         :host { all: initial; }
         * { box-sizing: border-box; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
-        .wrap { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+        .wrap { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: 100%; }
         .cap { max-width: 100%; padding: 10px 14px; border-radius: 14px; font-size: 15px; line-height: 1.45; color: #f4f6fb;
                background: rgba(10, 12, 20, .42); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
                border: 1px solid rgba(255,255,255,.12); transition: opacity .6s ease; max-height: 30vh; overflow: auto; }
@@ -1075,6 +1077,9 @@
                  font-size: 13px; background: rgba(10,12,20,.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
                  border: 1px solid rgba(255,255,255,.14); }
         .panel.on { display: flex; }
+        /* fitPanel() caps its height so its top stays PANEL_TOP below the window's top, clear of the page's search filters; the rest scrolls. */
+        .panel { overflow-y: auto; overscroll-behavior: contain; }
+        .panel > * { flex-shrink: 0; }
         .panel label { display: flex; flex-direction: column; gap: 5px; }
         .panel [hidden] { display: none; }
         .hint { font-size: 12px; line-height: 1.4; opacity: .75; }
@@ -1108,8 +1113,12 @@
                  color: #f4f6fb; font-size: 14px; line-height: normal; cursor: pointer; outline: none; text-overflow: ellipsis;
                  background: rgba(10,12,20,.5) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23f4f6fb' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 14px center;
                  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,.16); }
-        /* The Voice choice is sized like a page's small dropdowns (the Goals page's Live Data): as wide as its text, 34px tall. */
-        select.vmode, .listen select { align-self: flex-start; width: auto; max-width: 100%; height: auto; padding: 5px 32px 5px 12px; line-height: 1.55; background-position: right 13px center; }
+        /* The Voice, End of Your Turn and Mic Back choices: small, as wide as their text, at the far right of their label's line. A label's description
+           (Details) wraps to the line below. No display here, so .panel [hidden] still hides the Mic Back line. */
+        .panel label.inline { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; column-gap: 10px; }
+        .panel label.inline > small { flex-basis: 100%; }
+        select.vmode, .listen select { width: auto; max-width: 100%; height: auto; margin-left: auto; padding: 2px 24px 2px 10px; font-size: 12px; line-height: 1.5;
+                                       background-position: right 9px center; }
         select:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
         option, optgroup { color: #111; background: #fff; }
         button { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; padding: 9px 14px; border-radius: 999px;
@@ -1167,10 +1176,8 @@
         <div class="cap user" aria-live="polite"></div>
         <div class="cap claude"><button type="button" class="bulb" aria-expanded="false" title="Show the reply's extras" aria-label="Show the reply's extras" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.8 10.6c.6.5.8 1.2.8 1.9V16h6v-.5c0-.7.2-1.4.8-1.9A6 6 0 0 0 12 3z"/></svg></button><div class="extras" hidden></div><span class="claude-text" aria-live="polite"></span></div>
         <div class="cap notice" role="status"></div>
-        <form><input type="text" placeholder="Type to Claude…" aria-label="Message Claude"><button type="submit">Send</button></form>
-        <form class="pass"><input type="password" placeholder="Site passphrase" aria-label="Site passphrase" autocomplete="current-password"><button type="submit">Unlock</button></form>
         <div class="panel" id="cv-settings" role="group" aria-label="Voice settings">
-          <label>Voice
+          <label class="inline">Voice
             <select class="vmode">
               <option value="chosen">Chosen voice</option>
               <option value="random">Random voice</option>
@@ -1190,8 +1197,9 @@
           <div class="listen" role="group" aria-labelledby="cv-listen">
             <div class="head"><span id="cv-listen">Listening</span><button class="details btn-sm" type="button" aria-expanded="false">Details</button></div>
             <label class="check"><input type="checkbox" name="overlap"><span>Hear Me While Claude Speaks<small>The mic stays on while Claude talks. Claude's own words are left out of what it hears, so what you say at the same time is kept, and Claude listens until you stop.</small></span></label>
-            <label>End of Your Turn<select name="endPause"><option value="500">0.5 seconds</option><option value="800">0.8 seconds</option><option value="1000">1 second</option><option value="1500">1.5 seconds</option><option value="2500">2.5 seconds</option></select><small>How long a pause in your speaking sends what you said.</small></label>
-            <label class="mic-back">Mic Back After Claude<select name="micBack"><option value="250">0.25 seconds</option><option value="700">0.7 seconds</option><option value="1200">1.2 seconds</option></select><small>With Hear Me While Claude Speaks off, the mic is off while Claude talks and comes back this long after, once the echo has faded.</small></label>
+            <label class="inline">End of Your Turn<select name="endPause"><option value="500">0.5 seconds</option><option value="800">0.8 seconds</option><option value="1000">1 second</option><option value="1500">1.5 seconds</option><option value="2500">2.5 seconds</option></select><small>How long a pause in your speaking sends what you said.</small></label>
+            <label class="inline stt">Speech to Text<select name="stt"><option value="auto">Automatic</option><option value="browser">Browser</option><option value="bridge">Bridge</option></select><small>Automatic uses the browser's own speech input, and the bridge's where that's missing or isn't hearing you. The bridge records what you say and turns it into text on this computer (whisper.cpp) or with a cloud service.</small></label>
+            <label class="inline mic-back">Mic Back After Claude<select name="micBack"><option value="250">0.25 seconds</option><option value="700">0.7 seconds</option><option value="1200">1.2 seconds</option></select><small>With Hear Me While Claude Speaks off, the mic is off while Claude talks and comes back this long after, once the echo has faded.</small></label>
           </div>
           <div class="agent" role="group" aria-labelledby="cv-agent">
             <div class="head"><span id="cv-agent">Agent</span><a class="btn-sm keys" href="#edit=keys" title="Set My Keys">Keys</a></div>
@@ -1200,6 +1208,8 @@
             <div class="hint"><span class="agent-usage"></span> <button class="link agent-more" type="button" aria-expanded="false">Details</button><span class="agent-via" hidden></span></div>
           </div>
         </div>
+        <form><input type="text" placeholder="Type to Claude…" aria-label="Message Claude"><button type="submit">Send</button></form>
+        <form class="pass"><input type="password" placeholder="Site passphrase" aria-label="Site passphrase" autocomplete="current-password"><button type="submit">Unlock</button></form>
         <div class="row">
           <button class="kb gear" type="button" title="Voice settings" aria-label="Voice settings" aria-expanded="false" aria-controls="cv-settings">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -1241,24 +1251,40 @@
     const $ = (s) => root.querySelector(s);
     const wrap = $('.wrap'), label = $('.label'), userCap = $('.user'), claudeCap = $('.claude'), claudeText = $('.claude-text'), importantCap = $('.important'), noticeCap = $('.notice'), pastCap = $('.past'), form = $('form'), input = $('form input');
     $('.pill').addEventListener('click', actions.pill);
-    $('.type').addEventListener('click', () => { form.classList.toggle('on'); if (form.classList.contains('on')) input.focus(); });
+    const typeBtn = $('.type');
+    typeBtn.addEventListener('click', () => { form.classList.toggle('on'); if (form.classList.contains('on')) input.focus(); fitPanel(); });
     const panel = $('.panel'), gear = $('.gear'), modeSel = $('.vmode'), pick = $('.pick'), voiceSel = $('.voice'), hint = $('.hint');
+    // While the panel shows, the column keeps the width it had, so the panel's own width doesn't widen the typing box and Send under it.
     const showPanel = (on) => {
+      if (on !== panel.classList.contains('on')) wrap.style.width = on ? `${wrap.getBoundingClientRect().width}px` : '';
       panel.classList.toggle('on', on); wrap.classList.toggle('settings-open', on); gear.setAttribute('aria-expanded', String(on));
-      if (on) actions.panelOpened();
+      if (on) { actions.panelOpened(); fitPanel(); }
     };
+    // The panel's top (its Voice and Chosen voice lines) stays at least PANEL_TOP from the window's top, so it isn't behind
+    // the page's search filters. When it's taller than the room, its height is capped there and its contents scroll.
+    // Again whenever what's in or below it changes, and when the window is resized.
+    const PANEL_TOP = 48;
+    function fitPanel() {
+      if (!panel.classList.contains('on')) return;
+      panel.style.maxHeight = '';
+      const top = panel.getBoundingClientRect().top;
+      if (top < PANEL_TOP) panel.style.maxHeight = `${Math.max(120, panel.offsetHeight - (PANEL_TOP - top))}px`;
+    }
+    window.addEventListener('resize', fitPanel);
+    panel.addEventListener('click', () => requestAnimationFrame(fitPanel)); // Details, which show the choices' descriptions
+    panel.addEventListener('change', () => requestAnimationFrame(fitPanel)); // Chosen voice, shown or hidden by the Voice choice
     // Keys: edit=keys in this page's hash, which opens the keys panel here.
     $('.agent .keys').addEventListener('click', (e) => { e.preventDefault(); showPanel(false); actions.keys(); });
     form.addEventListener('submit', (e) => { e.preventDefault(); showPanel(false); const v = input.value.trim(); if (v) { input.value = ''; actions.typed(v); } });
     const passForm = $('.pass'), passInput = $('.pass input');
     passForm.addEventListener('submit', (e) => { e.preventDefault(); const v = passInput.value.trim(); if (v) { passInput.value = ''; passForm.classList.remove('on'); actions.passphrase(v); } });
-    // A click anywhere off the panel (and off its ⚙ button, which toggles it) closes it, Send included.
-    // Captured on window, so the page's own handlers can't stop it. On click rather than pointerdown: the typing box sits
-    // above the panel, so closing the panel on press would move Send out from under the pointer before the click lands.
+    // A click anywhere off the panel closes it, Send included, except on its ⚙ button, which toggles it, and the keyboard button,
+    // which opens and closes the typing box under it and leaves the panel as it is.
+    // Captured on window, so the page's own handlers can't stop it. On click rather than pointerdown, so the click lands where it was aimed.
     window.addEventListener('click', (e) => {
       if (!panel.classList.contains('on')) return;
       const path = e.composedPath();
-      if (!path.includes(panel) && !path.includes(gear)) showPanel(false);
+      if (!path.includes(panel) && !path.includes(gear) && !path.includes(typeBtn)) showPanel(false);
     }, true);
     gear.addEventListener('click', () => { showPanel(!panel.classList.contains('on')); if (panel.classList.contains('on')) modeSel.focus(); });
     root.addEventListener('keydown', (e) => {
@@ -1274,7 +1300,7 @@
     const listenBox = $('.listen'), listenDetails = $('.listen .details');
     listenDetails.addEventListener('click', () => listenDetails.setAttribute('aria-expanded', String(listenBox.classList.toggle('open'))));
     const listenInputs = [...root.querySelectorAll('.listen input, .listen select')];
-    listenInputs.forEach((c) => c.addEventListener('change', () => actions.listening(c.name, c.type === 'checkbox' ? c.checked : Number(c.value))));
+    listenInputs.forEach((c) => c.addEventListener('change', () => actions.listening(c.name, c.type === 'checkbox' ? c.checked : c.name === 'stt' ? c.value : Number(c.value))));
     const audioBtn = $('.audio'), motionBtn = $('.motion'), ownPlay = $('.playPauseButton');
     audioBtn.addEventListener('click', actions.audio);
     motionBtn.addEventListener('click', actions.motion);
@@ -1490,7 +1516,7 @@
         noteTimer = setTimeout(() => { noticeCap.style.opacity = 0; noteTimer = setTimeout(() => { noticeCap.textContent = ''; }, 600); }, ms);
       },
       fade(ms = 8000) { clearTimeout(fadeTimer); fadeTimer = setTimeout(() => { showReply(false); userCap.textContent = ''; }, ms); },
-      showInput(focus) { form.classList.add('on'); if (focus) input.focus(); },
+      showInput(focus) { form.classList.add('on'); fitPanel(); if (focus) input.focus(); },
       addInput,
       /** The typing box and the captions above the controls close (notes stay), as when a page's own panel opens
        *  there. Claude keeps listening, and the next reply shows as usual. */
@@ -1515,10 +1541,17 @@
       setVoiceInfo(m, name) { hint.textContent = VOICE_HINTS[m] + (name && m !== 'chosen' ? ` Now: ${name}.` : ''); },
       /** Text Output: { conversation, important, align, words, sets } as booleans. noWords: the page turned the floating words off (data-words). */
       /** Listening: { overlap, endPause, micBack }; noSR: no speech recognition here, so the section is hidden. */
-      setListening(o, noSR) {
-        listenBox.hidden = noSR;
+      // stt: the bridge's speech to text ({ name, model, local }), or null where there's none. Without the browser's own
+      // speech input (noSR), only the Speech to Text and End of Your Turn lines apply.
+      setListening(o, noSR, stt) {
+        listenBox.hidden = noSR && !stt;
         listenInputs.forEach((c) => { if (c.type === 'checkbox') c.checked = !!o[c.name]; else c.value = String(o[c.name]); });
-        $('.mic-back').hidden = !!o.overlap;
+        $('.stt').hidden = !stt;
+        const sttSel = $('[name="stt"]');
+        if (stt) sttSel.querySelector('[value="bridge"]').textContent = `Bridge (${stt.name})`;
+        sttSel.querySelector('[value="browser"]').disabled = noSR;
+        $('[name="overlap"]').closest('label').hidden = noSR;
+        $('.mic-back').hidden = !!o.overlap || noSR;
       },
       setTextOutput(o, noWords) {
         checks.forEach((c) => {
@@ -1592,13 +1625,30 @@
   // to take the real microphone, which needs macOS to allow Chrome (System Settings > Privacy & Security > Microphone);
   // that wasn't confirmed. Soon after, Chrome's speech input did work for the owner, with no change to this code, so
   // project/goals has CHROME_SPEECH (true) to say whether Chrome is asked for spoken answers and suggested for them.
+  // On iPhone and iPad, every browser other than Safari (Chrome: CriOS, Firefox: FxiOS, Edge: EdgiOS, Opera: OPiOS) runs
+  // on Apple's WKWebView, which has webkitSpeechRecognition but not the permission for it, so recognition fails with
+  // "service-not-allowed". Those are treated as having none: they suggest Safari, or the keyboard's dictation mic,
+  // which works in every iOS browser, into the typing box.
   const isBrave = !!navigator.brave;
-  const SR = isBrave ? null : (window.SpeechRecognition || window.webkitSpeechRecognition);
+  const isIosOther = /CriOS|FxiOS|EdgiOS|OPiOS/.test(navigator.userAgent);
+  const SR = isBrave || isIosOther ? null : (window.SpeechRecognition || window.webkitSpeechRecognition);
   const noSrNote = () => (isBrave
     ? `Brave blocks the speech recognition this needs. Use Chrome, Edge or Safari to talk, or type to ${shownName()} here.`
-    : `This browser has no speech recognition (try Chrome, Edge or Safari). You can type to ${shownName()} instead.`);
+    : isIosOther
+      ? `For voice input on iPhone or iPad, use Safari. Here, tap the mic on your keyboard to dictate, or type to ${shownName()}.`
+      : `This browser has no speech recognition (try Chrome, Edge or Safari). You can type to ${shownName()} instead.`);
+  // What each recognition error points to, logged to the console (onerror in startRecognition) to tell them apart.
+  const REC_ERRORS = {
+    'not-allowed': 'the microphone was blocked for this site (the address bar\'s site settings)',
+    'service-not-allowed': 'the browser won\'t allow its speech service here (on iOS: a browser other than Safari)',
+    'network': 'the browser couldn\'t reach its speech service (connection)',
+    'no-speech': 'nothing was heard: a quiet room, or silence from the mic (on a Mac, System Settings > Privacy & Security > Microphone for this browser)',
+    'audio-capture': 'no microphone was found',
+    'aborted': 'stopped by this page (Claude speaking, a pause, or the end of the conversation)',
+    'language-not-supported': 'the recognition language isn\'t supported',
+  };
   const tts = window.speechSynthesis;
-  let rec = null, wantListening = false, recRunning = false, restartDelay = 250, networkErrors = 0;
+  let rec = null, wantListening = false, recRunning = false, restartDelay = 250, networkErrors = 0, noSpeechWarned = false;
   let mode = 'off';            // off | wake | listening | thinking | speaking
   let history = [], pending = '', sendTimer = null, idleTimer = null, abortCtl = null, queuedTurn = '';
   // Only the start of a reply is spoken (SPOKEN_SENTENCES, or fewer once SPOKEN_WORDS is passed); the screen shows all of it, and the rest waits in unspoken.
@@ -1652,7 +1702,8 @@
     listening(name, value) {
       listenOpt[name] = value;
       store(LISTEN_KEY, JSON.stringify(listenOpt));
-      ui.setListening(listenOpt, !SR);
+      showListening();
+      if (name === 'stt') applyStt();
       if (name === 'overlap') micHold(mode === 'speaking'); // Turned on while Claude speaks, the mic comes back now
     },
   });
@@ -1677,7 +1728,7 @@
     emit('state', { state: m });
   }
 
-  const LABELS = { off: 'Enable voice', get wake() { return SR ? `Say “Ok ${shownName()}”` : 'Type to start'; }, listening: 'Listening… say “Thanks” to finish', thinking: 'Thinking…', speaking: 'Speaking… tap to interrupt', error: 'Voice unavailable' };
+  const LABELS = { off: 'Enable voice', get wake() { return wakeByVoice() ? `Say “Ok ${shownName()}”` : viaBridgeStt ? 'Tap to talk' : 'Type to start'; }, listening: 'Listening… say “Thanks” to finish', thinking: 'Thinking…', speaking: 'Speaking… tap to interrupt', error: 'Voice unavailable' };
   function showState() { ui.setState(mode, listenPaused && SR && mode !== 'off' && mode !== 'error' ? 'Listening paused' : LABELS[mode] || mode); }
 
   // --- pausing: Claude's voice holds mid-word (and later replies wait), and its motion freezes, until resumed. The pause
@@ -1706,6 +1757,7 @@
     }
     showState();
     ui.setPaused(audioPaused, motionPaused, listenPaused); syncPlayButton();
+    emit('pause', { audio: audioPaused, motion: motionPaused, listening: listenPaused });
   }
   function hold(p) { setAudioPaused(p); setMotionPaused(p); setListenPaused(p); }
   // During a conversation (listening, thinking or speaking), or while listening is paused, the page's play button
@@ -1745,10 +1797,11 @@
   }
   ['pointerdown', 'keydown', 'touchend'].forEach((ev) => document.addEventListener(ev, unlockAudio, { once: true, capture: true }));
 
-  let audioCtx = null;
+  let audioCtx = null, micStream = null; // micStream: the mic level's, which the bridge's recorder (bridgeRec) shares
   async function startMicLevel() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      micStream = stream;
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const an = audioCtx.createAnalyser(); an.fftSize = 512;
       audioCtx.createMediaStreamSource(stream).connect(an);
@@ -1758,10 +1811,35 @@
         let sum = 0; for (let i = 0; i < data.length; i += 4) { const v = (data[i] - 128) / 128; sum += v * v; }
         return clamp(Math.sqrt(sum / (data.length / 4)) * 4, 0, 1);
       });
+      watchSilentMic(an);
       return true;
     } catch (err) {
       return err && (err.name === 'NotAllowedError' || err.name === 'SecurityError') ? 'denied' : false;
     }
+  }
+
+  // A microphone the system won't let this browser use (on a Mac, System Settings > Privacy & Security > Microphone)
+  // still opens, but every sample is exactly zero, where a working one always picks up some noise. Then neither the
+  // browser's speech input nor the bridge's recording can hear anything, so a note says how to allow it. Checked over
+  // two seconds once the audio is running (it starts at the page's first tap), once per page.
+  function watchSilentMic(an) {
+    const buf = new Float32Array(an.fftSize);
+    let checks = 0, heard = false;
+    const look = () => {
+      if (!audioCtx || micStream === null) return;
+      if (audioCtx.state !== 'running') { audioCtx.addEventListener('statechange', look, { once: true }); return; }
+      an.getFloatTimeDomainData(buf);
+      for (let i = 0; i < buf.length && !heard; i++) if (buf[i] !== 0) heard = true;
+      if (heard) return;
+      if (++checks < 20) { setTimeout(look, 100); return; }
+      const mac = /mac/i.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '');
+      const where = mac ? 'System Settings > Privacy & Security > Microphone' : 'your system’s privacy settings';
+      const browser = isBrave ? 'Brave' : /Edg\//.test(navigator.userAgent) ? 'Edge' : /Chrome\//.test(navigator.userAgent) ? 'Chrome' : 'this browser';
+      console.warn(`[claude-voice] the microphone gives only silence: the system isn't letting ${browser} use it (${where})`);
+      ui.note(`${browser} gets only silence from the microphone. Turn on ${browser} in ${where}, then quit and reopen ${browser}. You can type to ${shownName()} meanwhile.`, 20000);
+      ui.showInput();
+    };
+    look();
   }
 
   // The settings panel's choices are remembered in this browser and win over data-voice / data-voice-mode.
@@ -1973,14 +2051,22 @@
   }
   applyTextOutput();
 
+  // Speech to text through the bridge (bridgeRec, below): what the bridge offers (transcriber, from .../status: { name,
+  // model, local }), whether it's listening that way now, and whether the browser's own recognition has failed here.
+  let transcriber = null, viaBridgeStt = false, srBroken = false, srHeard = false, srMisses = 0;
+  const bridgeSttReady = () => !!transcriber && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  const wakeByVoice = () => (viaBridgeStt ? !!(transcriber && transcriber.local) : !!SR);
+
   // Listening, also in the settings panel (the header's notes): remembered in this browser.
   const LISTEN_KEY = 'claude-voice:listening';
-  const listenOpt = { overlap: true, endPause: 800, micBack: 700 };
+  const listenOpt = { overlap: true, endPause: 800, micBack: 700, stt: 'auto' };
   try {
     const saved = JSON.parse(localStorage.getItem(LISTEN_KEY) || 'null');
     if (saved) Object.keys(listenOpt).forEach((k) => { if (typeof saved[k] === typeof listenOpt[k]) listenOpt[k] = saved[k]; });
   } catch (e) { /* storage blocked or unreadable */ }
-  ui.setListening(listenOpt, !SR);
+  if (!['auto', 'browser', 'bridge'].includes(listenOpt.stt)) listenOpt.stt = 'auto';
+  const showListening = () => ui.setListening(listenOpt, !SR, transcriber);
+  showListening();
 
   wordField.setCovers(ui.boxes);
   wordField.setPick(ui.addInput);
@@ -2048,13 +2134,26 @@
       rec.onstart = () => { recRunning = true; consumedUpTo = -1; echoResults.clear(); };
       rec.onresult = onResult;
       rec.onerror = (e) => {
+        // "aborted" is this page stopping it, so it's only a debug line; "no-speech", which comes every few seconds in a
+        // quiet room, is warned of once until something is heard again (onResult).
+        const why = `[claude-voice] speech recognition error: ${e.error}${e.message ? ` (${e.message})` : ''} - ${REC_ERRORS[e.error] || 'unknown'}`;
+        if (e.error === 'aborted') console.debug(why);
+        else if (e.error !== 'no-speech' || !noSpeechWarned) console.warn(why);
+        if (e.error === 'no-speech') noSpeechWarned = true;
+        // Where the bridge can listen instead (Speech to Text: Automatic), a failing service hands over to it: one that isn't
+        // allowed or doesn't know the language, one that can't be reached, and one that has never heard anything here in a
+        // conversation, twice in a row (Chrome on a Mac without the microphone for its recognition).
+        const handOver = () => sttFailed(`${isBrave ? 'Brave' : 'This browser'}’s speech input isn’t working here`);
+        if (e.error === 'service-not-allowed' || e.error === 'language-not-supported') { if (handOver()) return; }
+        if (e.error === 'no-speech' && mode === 'listening' && !srHeard && ++srMisses >= 2 && handOver()) return;
         if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
           wantListening = false; setMode('error'); ui.note('Microphone access was blocked. Allow it in the address bar, then tap the button. You can also type.', 12000); ui.showInput();
         } else if (e.error === 'audio-capture') {
           wantListening = false; setMode('error'); ui.note('No microphone was found. Connect one, then tap the button. You can also type.', 12000); ui.showInput();
         } else if (e.error === 'network') {
           // A few in a row with nothing heard means the speech service is unreachable, not a blip.
-          if (++networkErrors >= 3) { wantListening = false; setMode('error'); ui.note(`Speech recognition can’t reach its service in this browser. Try Chrome, Edge or Safari, or type to ${shownName()} here.`, 12000); ui.showInput(); }
+          if (++networkErrors >= 3 && handOver()) return;
+          if (networkErrors >= 3) { wantListening = false; setMode('error'); ui.note(`Speech recognition can’t reach its service in this browser. Try Chrome, Edge or Safari, or type to ${shownName()} here.`, 12000); ui.showInput(); }
           else restartDelay = Math.min(8000, restartDelay * 2);
         }
       };
@@ -2066,6 +2165,154 @@
     try { rec.start(); } catch (e) { /* already running */ }
   }
   function stopRecognition() { wantListening = false; if (rec && recRunning) try { rec.abort(); } catch (e) { /* ignore */ } }
+
+  // --- speech to text through the bridge, for a browser whose own speech input is missing (Brave, Firefox, iOS browsers
+  // other than Safari) or isn't working (sttFailed). What you say is recorded from the mic (the mic level's stream), cut
+  // into turns where you pause (End of Your Turn, at least BRIDGE_PAUSE) and posted a turn at a time to the bridge's
+  // .../transcribe as a 16 kHz WAV, which it turns into text with whisper.cpp on this computer or a cloud service
+  // (server/local-bridge.mjs). The text goes on as a spoken turn does. Only where the bridge says it can (transcriber, from
+  // .../status), so not on the deployed site, whose Worker has none. Speech to Text in the settings panel: Automatic (the
+  // browser's own, and the bridge where that's missing or fails), Browser or Bridge.
+  // It doesn't listen while Claude speaks or thinks, or for ECHO_TAIL after, since Claude's own voice isn't taken out of
+  // it. Waiting for "Ok Claude" it listens only when the transcriber is on this computer; with a cloud service, a tap starts.
+  const TRANSCRIBE_URL = cfg.endpoint.replace(/\/?$/, '/transcribe');
+  const BRIDGE_PAUSE = 700, BRIDGE_PRE = 300, BRIDGE_MIN_SPEECH = 250, BRIDGE_MAX = 30000; // ms
+  // Whether to listen through the bridge, by the Speech to Text choice.
+  const wantBridgeStt = () => bridgeSttReady() && (listenOpt.stt === 'bridge' || (listenOpt.stt === 'auto' && (!SR || srBroken)));
+  const bridgeRec = (() => {
+    let ctx = null, ownCtx = false, src = null, node = null, stream = null, ownStream = false, on = false;
+    let pre = [], chunks = [], inSpeech = false, speechMs = 0, silentMs = 0, totalMs = 0, floor = 0.004;
+    let queue = Promise.resolve();
+    const canHear = () => !listenPaused && Date.now() >= echoUntil && (mode === 'listening' || (mode === 'wake' && wakeByVoice()));
+    function reset() { pre = []; chunks = []; inSpeech = false; speechMs = 0; silentMs = 0; totalMs = 0; }
+    function onAudio(e) {
+      const d = e.inputBuffer.getChannelData(0), ms = (d.length / ctx.sampleRate) * 1000;
+      if (!canHear()) { if (inSpeech || pre.length) reset(); return; }
+      let sum = 0;
+      for (let i = 0; i < d.length; i++) sum += d[i] * d[i];
+      // Speech: well above the room's own level (floor, which follows the quiet between words).
+      const rms = Math.sqrt(sum / d.length), loud = rms > Math.max(0.012, floor * 3);
+      const copy = new Float32Array(d);
+      if (!inSpeech) {
+        if (!loud) floor = floor * 0.9 + rms * 0.1;
+        pre.push(copy); // a moment before the first loud part, so the first word's start isn't cut
+        while (pre.length > Math.ceil(BRIDGE_PRE / ms) + 1) pre.shift();
+        if (loud) { inSpeech = true; chunks = pre; pre = []; speechMs = ms; silentMs = 0; totalMs = chunks.length * ms; }
+        return;
+      }
+      chunks.push(copy); totalMs += ms;
+      if (loud) { speechMs += ms; silentMs = 0; if (mode === 'listening') resetIdle(); } else silentMs += ms;
+      if (silentMs >= Math.max(BRIDGE_PAUSE, listenOpt.endPause) || totalMs >= BRIDGE_MAX) turnDone();
+    }
+    // A turn: sent unless it was only a click or a cough. Turns are turned into text one after another, in order.
+    function turnDone() {
+      const got = chunks, rate = ctx.sampleRate, enough = speechMs >= BRIDGE_MIN_SPEECH;
+      reset();
+      if (!enough) return;
+      const wav = toWav(got, rate);
+      if (mode === 'listening') ui.user('…');
+      queue = queue.then(() => transcribe(wav)).then(bridgeHeard).catch((err) => {
+        console.warn('[claude-voice] speech to text through the bridge failed:', err.message);
+        if (mode === 'listening') ui.user('');
+        ui.note(`Couldn’t turn what you said into text: ${err.message}`, 8000);
+      });
+    }
+    async function start() {
+      if (on) return true;
+      try {
+        stream = micStream; ownStream = !stream;
+        if (!stream) stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+        ctx = audioCtx; ownCtx = !ctx;
+        if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+        if (ctx.state === 'suspended') ctx.resume().catch(() => {}); // or at the page's first tap (unlockAudio)
+        src = ctx.createMediaStreamSource(stream);
+        node = ctx.createScriptProcessor(4096, 1, 1);
+        node.onaudioprocess = onAudio;
+        src.connect(node); node.connect(ctx.destination); // it only runs connected; what it passes on is silence
+        reset(); on = true;
+        return true;
+      } catch (err) {
+        console.warn('[claude-voice] recording for the bridge failed:', err.name, err.message);
+        return err && (err.name === 'NotAllowedError' || err.name === 'SecurityError') ? 'denied' : false;
+      }
+    }
+    function stop() {
+      if (!on) return;
+      on = false; reset();
+      node.onaudioprocess = null;
+      try { src.disconnect(); node.disconnect(); } catch (e) { /* already */ }
+      if (ownStream) stream.getTracks().forEach((t) => t.stop());
+      if (ownCtx) ctx.close().catch(() => {});
+      ctx = src = node = stream = null;
+    }
+    return { start, stop };
+  })();
+  // A turn's sound as a 16 kHz, 16-bit mono WAV, which whisper.cpp reads as it is and cloud services take too.
+  function toWav(chunks, rate) {
+    const n = chunks.reduce((t, c) => t + c.length, 0), all = new Float32Array(n);
+    let o = 0;
+    for (const c of chunks) { all.set(c, o); o += c.length; }
+    const ratio = rate / 16000, len = Math.floor(n / ratio), pcm = new Int16Array(len);
+    for (let i = 0; i < len; i++) { // each sample the average of those it stands for
+      const a = Math.floor(i * ratio), b = Math.min(n, Math.floor((i + 1) * ratio));
+      let t = 0;
+      for (let j = a; j < b; j++) t += all[j];
+      pcm[i] = Math.max(-1, Math.min(1, b > a ? t / (b - a) : all[a] || 0)) * 0x7fff;
+    }
+    const buf = new ArrayBuffer(44 + pcm.length * 2), v = new DataView(buf);
+    const str = (at, s) => { for (let i = 0; i < s.length; i++) v.setUint8(at + i, s.charCodeAt(i)); };
+    str(0, 'RIFF'); v.setUint32(4, 36 + pcm.length * 2, true); str(8, 'WAVE'); str(12, 'fmt ');
+    v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, 16000, true);
+    v.setUint32(28, 32000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); str(36, 'data'); v.setUint32(40, pcm.length * 2, true);
+    new Int16Array(buf, 44).set(pcm);
+    return new Blob([buf], { type: 'audio/wav' });
+  }
+  async function transcribe(wav) {
+    const res = await fetch(`${TRANSCRIBE_URL}?lang=${encodeURIComponent(cfg.lang)}`, { method: 'POST', headers: { 'content-type': 'audio/wav' }, body: wav });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(j.error || `the bridge answered ${res.status}`);
+    return String(j.text || '').trim();
+  }
+  // What the bridge heard, taken as the browser's recognition takes a final result (onFinal), but sent at once.
+  function bridgeHeard(text) {
+    if (!text) { if (mode === 'listening' && !pending) ui.user(''); return; }
+    if (mode === 'wake') { const m = text.match(WAKE_RE); if (m) beginConversation(text.slice(m.index + m[0].length).trim()); return; }
+    if (mode === 'thinking') { if (isThanks(text)) { interrupt(); endConversation(true); } else queuedTurn = (queuedTurn + ' ' + text).trim(); return; }
+    if (mode === 'listening' || mode === 'speaking') { const t = text.replace(WAKE_RE, ' ').trim(); if (t) deliver(t); }
+  }
+  // Listening through the bridge (on) or the browser's recognition, while the widget is on.
+  async function listenVia(bridge, note) {
+    if (mode === 'off' || mode === 'error') { viaBridgeStt = false; return true; }
+    if (bridge === viaBridgeStt) return true;
+    if (bridge) {
+      stopRecognition();
+      viaBridgeStt = true;
+      const ok = await bridgeRec.start();
+      if (ok !== true) {
+        viaBridgeStt = false;
+        if (ok === 'denied') { setMode('error'); ui.note('Microphone access was blocked. Allow it in the address bar, then tap the button. You can also type.', 12000); ui.showInput(); }
+        else { ui.note(`The microphone couldn’t be recorded here. You can type to ${shownName()} instead.`, 10000); ui.showInput(); }
+        showState(); emit('stt', { via: 'none' });
+        return false;
+      }
+      if (note) ui.note(note, 9000);
+      console.info(`[claude-voice] speech to text through the bridge: ${transcriber.name} (${transcriber.model})`);
+    } else {
+      bridgeRec.stop(); viaBridgeStt = false;
+      if (SR) startRecognition();
+    }
+    showState(); emit('stt', { via: viaBridgeStt ? transcriber.name : 'browser' });
+    return true;
+  }
+  // The browser's recognition failed: with Speech to Text on Automatic and the bridge able to, it listens instead.
+  function sttFailed(why) {
+    if (listenOpt.stt !== 'auto' || !bridgeSttReady() || viaBridgeStt) return false;
+    srBroken = true;
+    listenVia(true, `${why}, so ${shownName()} now listens through the bridge (${transcriber.name}).`);
+    return true;
+  }
+  // The Speech to Text choice, changed in the settings panel.
+  function applyStt() { listenVia(wantBridgeStt() || (!SR && bridgeSttReady())); }
 
   // A pause of listenOpt.endPause (0.8 seconds unless changed) without new words means you've finished. The recogniser's
   // own "final" result can lag well behind that, so the pause is timed from the last interim words and acted on without
@@ -2138,7 +2385,7 @@
   }
 
   function onResult(e) {
-    restartDelay = 250; networkErrors = 0;
+    restartDelay = 250; networkErrors = 0; noSpeechWarned = false; srHeard = true; srMisses = 0;
     let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
       if (i <= consumedUpTo) continue;
@@ -2602,10 +2849,16 @@
       if (!res.ok) throw new Error(String(res.status));
       server = await res.json();
       if (server.agent) agent = server.agent;
+      if ('transcribe' in server && JSON.stringify(server.transcribe || null) !== JSON.stringify(transcriber)) {
+        transcriber = server.transcribe || null;
+        showListening(); showState(); emit('stt', { via: viaBridgeStt ? transcriber && transcriber.name : SR ? 'browser' : 'none' });
+      }
     } catch (e) { server = null; }
     showAgent();
   }
   showAgent();
+  // Asked once at load too, for whether the bridge can turn speech into text (transcriber). start() waits for it.
+  const statusReady = checkAgent();
 
   // --- text to speech (own queue so we can pulse visuals, interrupt, and recover from stuck engines)
   // While Claude's voice is paused, a reply's sentences wait to be spoken, but their large words show as they arrive.
@@ -2643,9 +2896,8 @@
     if (voice) u.voice = voice;
     u.lang = (voice && voice.lang) || cfg.lang; u.rate = 1.02; u.pitch = 1;
     u.onboundary = (ev) => { if (ev.name === 'word' || ev.name === undefined) scene.pulse(0.06 + 0.12 * (scene.state.energy || 0)); };
-    let begun = false, nudges = 0, nudgeTimer;
-    u.onstart = () => { begun = true; clearTimeout(nudgeTimer); voiceBlockNoted = false; scene.pulse(0.15); echoSpoken(spoken); };
-    u.onend = () => { clearTimeout(nudgeTimer); finish(); };
+    u.onstart = () => { voiceBlockNoted = false; scene.pulse(0.15); echoSpoken(spoken); };
+    u.onend = finish;
     u.onerror = (e) => {
       // Browsers refuse to speak ("not-allowed") until the page has had a click or key press, and when the site's
       // Autoplay setting blocks sound. Without this note the reply would go by in silence.
@@ -2653,20 +2905,9 @@
         voiceBlockNoted = true;
         ui.note(`${isBrave ? 'Brave' : 'Your browser'} blocked ${shownName()}’s voice. Click anywhere on the page, or allow Autoplay for this site in the site settings (left of the address).`, 15000);
       }
-      clearTimeout(nudgeTimer);
       finish();
     };
     tts.speak(u);
-    // Chrome can hold a sentence in its queue without speaking it, often the first reply on a newly loaded page, until its
-    // speech is paused and resumed, as turning the voice toggle off and on does. So a sentence that hasn't started within
-    // a second (with the voice on) is nudged that way, up to three times, a second apart.
-    if (!audioPaused) tts.resume();
-    const nudge = () => {
-      if (begun || finished || speaking !== item || nudges >= 3) return;
-      if (!audioPaused) { nudges++; tts.pause(); tts.resume(); }
-      nudgeTimer = setTimeout(nudge, 1000);
-    };
-    nudgeTimer = setTimeout(nudge, 1000);
   }
   function afterSpeech() {
     wordField.finish();
@@ -2701,7 +2942,8 @@
   // --- lifecycle
   async function start() {
     if (mode !== 'off' && mode !== 'error') return;
-    if (!SR) {
+    await statusReady; // whether the bridge can turn speech into text (transcriber)
+    if (!SR && !bridgeSttReady()) {
       setMode('wake');
       ui.note(noSrNote(), 10000);
       ui.showInput();
@@ -2710,10 +2952,10 @@
     const mic = cfg.micLevel ? await startMicLevel() : true;
     if (mic === 'denied') { setMode('error'); ui.note('Microphone access was blocked. Allow it in the address bar, then tap the button. You can also type.', 12000); ui.showInput(); return; }
     setMode('wake');
-    startRecognition();
+    if (wantBridgeStt() || !SR) listenVia(true); else startRecognition();
   }
   function stop() {
-    interrupt(); stopRecognition(); clearTimeout(idleTimer);
+    interrupt(); stopRecognition(); bridgeRec.stop(); viaBridgeStt = false; clearTimeout(idleTimer);
     setMode('off'); scene.applyMood(MOODS.idle);
   }
 
@@ -2753,11 +2995,13 @@
     /** Closes the typing box and the captions, such as for a page's panel opening where they show. */
     hideText: () => ui.hideText(),
     /** Whether this browser can hear speech (not Brave, which turns the service off, and not one without it). */
-    get canListen() { return !!SR; },
+    get canListen() { return !!SR || bridgeSttReady(); },
     say(text) { if (mode === 'off' || mode === 'wake' || mode === 'error') { const m = text.match(WAKE_RE); if (m) return beginConversation(text.slice(m.index + m[0].length).trim()); return beginConversation(text, true); } if (mode === 'speaking' || mode === 'thinking') interrupt(); handleUtterance(text); },
     setMood: (m) => scene.applyMood(typeof m === 'string' ? MOODS[m] || { mood: m } : m),
     on(type, fn) { (listeners[type] = listeners[type] || []).push(fn); return () => { listeners[type] = listeners[type].filter((f) => f !== fn); }; },
     get state() { return mode; },
+    /** Whether listening is paused (the pause button), so a page's "I'm listening" can go. */
+    get listenPaused() { return listenPaused; },
     get history() { return history.slice(); },
     config: cfg,
     moods: Object.keys(MOODS),

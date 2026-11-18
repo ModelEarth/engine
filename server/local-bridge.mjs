@@ -8,12 +8,13 @@
 //   webroot's files (this submodule's parent folder) to answer questions about the site, but not change them or read anything
 //   outside it. CLI_READ_FILES=false answers without files.
 // LOCAL_BACKEND=api answers through the Claude API with ANTHROPIC_API_KEY from .env.
+// POST .../transcribe turns speech into text for browsers whose own speech input is missing or fails (see TRANSCRIBE below).
 // No npm dependencies; needs Node 18+.
 
 import http from 'node:http';
 import { spawn } from 'node:child_process';
-import { readFileSync, existsSync, statSync, createReadStream, mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, existsSync, statSync, createReadStream, mkdtempSync, readdirSync, writeFileSync, unlinkSync } from 'node:fs';
+import { tmpdir, homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_MODEL, pageFile, pagePath, sanitizeMessages, systemPrompt, transcriptPrompt } from '../shared/voice-prompt.js';
@@ -196,6 +197,82 @@ function askApi(messages, system, onText, signal, output, onInfo = () => {}) {
   return streamClaude({ apiKey: process.env.ANTHROPIC_API_KEY, model: MODEL, system, messages, signal, onText, onUsage: (usage) => onInfo({ usage }), onThinking: (thinking) => onInfo({ thinking }) });
 }
 
+// ---------- speech to text ----------
+// For a browser whose own speech input is missing (Brave, Firefox, iOS browsers other than Safari) or isn't working:
+// claude-voice.js records what's said, a turn at a time, and posts it to .../transcribe as a 16 kHz mono WAV. The text
+// comes back as { text } and the page sends it on as a spoken turn. TRANSCRIBE picks how:
+//   auto (default)  whisper.cpp when it's set up, else a cloud service when it has a key, else none (the page then types)
+//   whisper         whisper.cpp on this computer: WHISPER_CLI (default whisper-cli, as Homebrew's whisper-cpp installs it)
+//                   and WHISPER_MODEL, a ggml model file (default: one found in ~/.cache/whisper.cpp, ~/whisper.cpp/models
+//                   or Homebrew's share/whisper-cpp, preferring base.en). brew install whisper-cpp, then download a model:
+//                   curl -L -o ~/.cache/whisper.cpp/ggml-base.en.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+//   cloud           an OpenAI-compatible /audio/transcriptions endpoint: TRANSCRIBE_URL (default OpenAI's),
+//                   TRANSCRIBE_API_KEY (default OPENAI_API_KEY) and TRANSCRIBE_MODEL (default gpt-4o-mini-transcribe).
+//                   Groq works too, with its URL, key and a model such as whisper-large-v3-turbo.
+//   off             none
+const TRANSCRIBE = (process.env.TRANSCRIBE || 'auto').toLowerCase();
+const WHISPER_PREFER = ['base.en', 'small.en', 'large-v3-turbo', 'medium.en', 'base', 'small', 'tiny.en', 'tiny'];
+function onPath(cmd) {
+  if (path.isAbsolute(cmd)) return existsSync(cmd) ? cmd : null;
+  for (const dir of (process.env.PATH || '').split(path.delimiter)) { const f = path.join(dir, cmd); if (dir && existsSync(f)) return f; }
+  return null;
+}
+function findWhisperModel() {
+  if (process.env.WHISPER_MODEL) return existsSync(process.env.WHISPER_MODEL) ? process.env.WHISPER_MODEL : null;
+  const dirs = [path.join(homedir(), '.cache', 'whisper.cpp'), path.join(homedir(), 'whisper.cpp', 'models'),
+    '/opt/homebrew/share/whisper-cpp', '/opt/homebrew/share/whisper-cpp/models', '/usr/local/share/whisper-cpp', '/usr/local/share/whisper-cpp/models'];
+  const found = [];
+  for (const dir of dirs) { try { for (const f of readdirSync(dir)) if (/^ggml-.+\.bin$/.test(f)) found.push(path.join(dir, f)); } catch { /* not there */ } }
+  const rank = (f) => { const i = WHISPER_PREFER.findIndex((n) => path.basename(f) === `ggml-${n}.bin`); return i < 0 ? 99 : i; };
+  return found.sort((a, b) => rank(a) - rank(b))[0] || null;
+}
+function pickTranscriber() {
+  if (TRANSCRIBE === 'off') return null;
+  if (TRANSCRIBE === 'auto' || TRANSCRIBE === 'whisper') {
+    const cli = onPath(process.env.WHISPER_CLI || 'whisper-cli'), model = cli && findWhisperModel();
+    if (cli && model) return { kind: 'whisper', name: 'whisper.cpp', model: path.basename(model).replace(/^ggml-|\.bin$/g, ''), local: true, cli, file: model };
+    if (TRANSCRIBE === 'whisper') { log(`speech to text: whisper.cpp isn't set up (${cli ? 'no model found; set WHISPER_MODEL' : 'whisper-cli not found; set WHISPER_CLI'})`); return null; }
+  }
+  // A key left as the example's placeholder (your-openai-api-key) counts as none.
+  const key = [process.env.TRANSCRIBE_API_KEY, process.env.OPENAI_API_KEY].find((k) => k && !/^(your|<|xxx|placeholder|changeme)/i.test(k));
+  if (!key) { if (TRANSCRIBE === 'cloud') log('speech to text: no TRANSCRIBE_API_KEY or OPENAI_API_KEY'); return null; }
+  const url = process.env.TRANSCRIBE_URL || 'https://api.openai.com/v1/audio/transcriptions';
+  const host = (() => { try { return new URL(url).hostname; } catch { return url; } })();
+  const name = /openai/.test(host) ? 'OpenAI' : /groq/.test(host) ? 'Groq' : host;
+  return { kind: 'cloud', name, model: process.env.TRANSCRIBE_MODEL || 'gpt-4o-mini-transcribe', local: false, url, key };
+}
+let TRANSCRIBER = null; // set once the log is ready, at listen
+const shownTranscriber = () => TRANSCRIBER && { name: TRANSCRIBER.name, model: TRANSCRIBER.model, local: TRANSCRIBER.local };
+// What whisper writes for silence or noise ([BLANK_AUDIO], (music)) is dropped.
+const cleanText = (t) => String(t || '').replace(/\[[^\]]*\]|\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+
+function transcribeWhisper(wav, lang, signal) {
+  const file = path.join(cliWorkDir, `speech-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.wav`);
+  writeFileSync(file, wav);
+  return new Promise((resolve, reject) => {
+    const child = spawn(TRANSCRIBER.cli, ['-m', TRANSCRIBER.file, '-f', file, '-l', lang || 'auto', '-nt', '-np'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '', err = '';
+    const timer = setTimeout(() => child.kill('SIGTERM'), 60000);
+    const onAbort = () => child.kill('SIGTERM');
+    signal.addEventListener('abort', onAbort, { once: true });
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { err += d; });
+    const done = () => { clearTimeout(timer); signal.removeEventListener('abort', onAbort); try { unlinkSync(file); } catch { /* gone */ } };
+    child.on('error', (e) => { done(); reject(e); });
+    child.on('close', (code) => { done(); if (code === 0) resolve(out); else reject(new Error(err.trim().split('\n').pop() || `whisper-cli exited with code ${code}`)); });
+  });
+}
+async function transcribeCloud(wav, lang, signal) {
+  const form = new FormData();
+  form.append('file', new Blob([wav], { type: 'audio/wav' }), 'speech.wav');
+  form.append('model', TRANSCRIBER.model);
+  if (lang) form.append('language', lang);
+  const res = await fetch(TRANSCRIBER.url, { method: 'POST', headers: { authorization: `Bearer ${TRANSCRIBER.key}` }, body: form, signal });
+  const body = await res.text();
+  if (!res.ok) throw new Error(`${TRANSCRIBER.name} answered ${res.status}: ${body.slice(0, 200)}`);
+  return JSON.parse(body).text;
+}
+
 // ---------- HTTP ----------
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -217,11 +294,11 @@ function serveStatic(req, res) {
   createReadStream(file).pipe(res);
 }
 
-function readBody(req, limit = 200_000) {
+function readBody(req, limit = 200_000, raw = false) {
   return new Promise((resolve, reject) => {
     let size = 0; const chunks = [];
     req.on('data', (c) => { size += c.length; if (size > limit) { reject(new Error('Body too large')); req.destroy(); } else chunks.push(c); });
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('end', () => { const b = Buffer.concat(chunks); resolve(raw ? b : b.toString('utf8')); });
     req.on('error', reject);
   });
 }
@@ -230,7 +307,7 @@ const server = http.createServer(async (req, res) => {
   const origin = req.headers.origin;
   const url = new URL(req.url, 'http://x');
 
-  if (url.pathname === API_PATH || url.pathname === API_PATH + '/health' || url.pathname === API_PATH + '/status') {
+  if (url.pathname === API_PATH || ['/health', '/status', '/transcribe'].some((p) => url.pathname === API_PATH + p)) {
     if (!originAllowed(origin)) { res.writeHead(403); return res.end('Origin not allowed'); }
     const cors = origin ? { 'access-control-allow-origin': origin, vary: 'Origin' } : {};
     if (req.method === 'OPTIONS') {
@@ -245,9 +322,30 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname.endsWith('/status')) {
       res.writeHead(200, { ...cors, 'content-type': 'application/json', 'cache-control': 'no-store' });
       const now = Date.now();
-      return res.end(JSON.stringify({ agent: AGENT, running: [...running.values()].map((r) => ({ ...r, seconds: Math.round((now - r.started) / 1000) })), last: lastRun }));
+      return res.end(JSON.stringify({ agent: AGENT, running: [...running.values()].map((r) => ({ ...r, seconds: Math.round((now - r.started) / 1000) })), last: lastRun, transcribe: shownTranscriber() }));
     }
     if (req.method !== 'POST') { res.writeHead(405, cors); return res.end(); }
+
+    // Speech to text: a WAV in, { text } out (or { error }). ?lang= is the page's language (en-US), sent as its first part.
+    if (url.pathname.endsWith('/transcribe')) {
+      const reply = (code, obj) => { res.writeHead(code, { ...cors, 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(obj)); };
+      if (!TRANSCRIBER) return reply(501, { error: 'No speech to text is set up on the bridge (TRANSCRIBE in server/local-bridge.mjs).' });
+      let wav;
+      try { wav = await readBody(req, 8_000_000, true); } catch { return reply(413, { error: 'The recording is too long.' }); }
+      if (wav.length < 44 || wav.toString('ascii', 0, 4) !== 'RIFF') return reply(400, { error: 'Expected a WAV recording.' });
+      const lang = (url.searchParams.get('lang') || '').split('-')[0].toLowerCase().replace(/[^a-z]/g, '');
+      const ac = new AbortController();
+      res.on('close', () => { if (!res.writableEnded) ac.abort(); });
+      const started = Date.now();
+      try {
+        const text = cleanText(await (TRANSCRIBER.kind === 'whisper' ? transcribeWhisper : transcribeCloud)(wav, lang, ac.signal));
+        log(`transcribed ${(wav.length / 32000).toFixed(1)}s of speech via ${TRANSCRIBER.name} in ${Date.now() - started} ms`);
+        return reply(200, { text, via: TRANSCRIBER.name });
+      } catch (err) {
+        log(`speech to text error: ${err.message}`);
+        return reply(502, { error: err.message });
+      }
+    }
 
     let messages, output, page;
     try { ({ messages, output, page } = JSON.parse(await readBody(req))); messages = sanitizeMessages(messages); } catch { messages = null; }
@@ -307,4 +405,7 @@ server.listen(PORT, HOST, () => {
   if (SERVE_ROOT) log(`serving ${SERVE_ROOT} at http://localhost:${PORT}/`);
   if (BACKEND === 'cli') log(`CLI: ${CLI} (run "claude" once and log in if you have not)`);
   if (BACKEND === 'cli') log(READ_FILES ? `CLI files: reads ${WEBROOT}, read-only (CLI_READ_FILES=false to turn off)` : 'CLI files: none');
+  TRANSCRIBER = pickTranscriber();
+  log(TRANSCRIBER ? `speech to text: ${TRANSCRIBER.name} (${TRANSCRIBER.model}) at ${API_PATH}/transcribe`
+    : 'speech to text: none, so browsers without their own speech input type instead (see TRANSCRIBE in this file)');
 });

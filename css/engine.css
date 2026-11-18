@@ -7,9 +7,9 @@
    and controls, and on project/goals its hero photos and the Earth map (localsite's placeEarthDisplay()).
    It has no z-index of its own, so what's in it keeps its place in the page's stacking order. */
 html #fullscreen { position: fixed; inset: 0; height: auto; box-sizing: border-box; }
-/* The page's search filters (#filterFieldsHolder, until they're fixed with their own z-index) are
-   raised above it. */
-#filterFieldsHolder:not(.filterFieldsHolderFixed) { position: relative; z-index: 3; }
+/* The page's search filters (#filterFieldsHolder, until they're fixed with their own z-index) and the
+   topics panel the .showApps button opens below them (#bigThumbPanelHolder) are raised above it. */
+#filterFieldsHolder:not(.filterFieldsHolderFixed), #bigThumbPanelHolder { position: relative; z-index: 3; }
 /* The Earth map's stack of circles in the upper right (zoom + and -, the close-X and the scroll circle, placed 22px
    down by base.css) goes 22px below the header, since #fullscreen's top is behind it: --header-h where the page
    sets it (project/goals: where #goalsPage starts), else the header's height (--headerbar-offset, localsite.js).

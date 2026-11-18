@@ -1,7 +1,8 @@
 /* Talk circle: a large see-through circle that pulses slowly and shows one brief question at a time in large
    type, for people to answer by voice, such as seniors and people living with dementia. A tap or click on it has
    the voice widget (engine/claude-voice.js) ask the question aloud and listen for the answer, and Claude replies
-   warmly with a gentle follow-up. Without the voice widget, the browser just reads the question aloud.
+   warmly with a gentle follow-up. Without the voice widget, the browser just reads the question aloud. The left and
+   right arrow keys move through the questions (arrowKeys).
    Styles are in engine/css/engine.css. Used by project/goals (above its tabs) and project/care (centered).
 
    Each folder has its own questions. Two ways to add the circle:
@@ -50,8 +51,9 @@
     if (/win/i.test(platform)) return CHROME_SPEECH ? "Edge or Chrome" : "Edge";
     return CHROME_SPEECH && /android|linux|cros|chrome os/i.test(ua + platform) ? "Chrome" : "";
   }
-  // The voice widget's answer when it's loaded. Brave has SpeechRecognition but turns off the service behind it.
-  const canListen = () => (typeof window.ClaudeVoice?.canListen === "boolean" ? window.ClaudeVoice.canListen : !navigator.brave && !!(window.SpeechRecognition || window.webkitSpeechRecognition));
+  // The voice widget's answer when it's loaded. Brave has SpeechRecognition but turns off the service behind it, and
+  // iOS browsers other than Safari have it without the permission to use it.
+  const canListen = () => (typeof window.ClaudeVoice?.canListen === "boolean" ? window.ClaudeVoice.canListen : !navigator.brave && !/CriOS|FxiOS|EdgiOS|OPiOS/.test(navigator.userAgent) && !!(window.SpeechRecognition || window.webkitSpeechRecognition));
   // Whether the circle asks for a spoken answer: where the browser can listen, except Chrome on Mac without CHROME_SPEECH.
   const chromeMac = (() => {
     const brands = navigator.userAgentData?.brands;
@@ -112,6 +114,11 @@
       const q = (String(e.detail?.text || "").match(/[^.!?]*\?/g) || []).pop()?.trim();
       if (q && q.length <= 140) showText(q);
     }, true);
+    // Once the widget knows whether it can listen through the bridge (speech to text for browsers without their own),
+    // the hint asks for a spoken or typed answer to match.
+    document.addEventListener("claude-voice:stt", () => { if (!talking) setState("idle"); }, true);
+    // While the widget's pause button holds listening, the circle doesn't say it's listening.
+    document.addEventListener("claude-voice:pause", () => { if (zone?.dataset.state === "listening") setState("listening"); }, true);
     document.addEventListener("claude-voice:end", () => {
       if (!talking) return;
       setTalking(false);
@@ -123,6 +130,7 @@
     window.addEventListener("resize", place);
     window.addEventListener("hashchange", showLinks);
     document.addEventListener("visibilitychange", syncTimer);
+    document.addEventListener("keydown", arrowKeys);
     if (opts.questions) setQuestions(opts.questions);
     else place();
     return api;
@@ -223,6 +231,22 @@
     at = (at + 1) % questions.length;
     showText(questions[at]);
   }
+  // The left and right arrow keys move back and forward through the questions, around the list either way, so back
+  // from the first goes to the last. Only while the circle shows, and while the focus is on the page itself or in the
+  // circle's area, so the keys still work as usual in the page's controls and the voice widget's typing box.
+  function arrowKeys(e) {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (!area || area.hidden || questions.length < 2) return;
+    const focus = document.activeElement;
+    if (focus && focus !== document.body && focus !== document.documentElement && !area.contains(focus)) return;
+    e.preventDefault();
+    at = (at + (e.key === "ArrowRight" ? 1 : -1) + questions.length) % questions.length;
+    showText(questions[at], true); // At once, without the fade
+    // A fresh TALK_MS before the next change on its own.
+    if (timer) { clearInterval(timer); timer = null; }
+    syncTimer();
+  }
   // The start of a question, for the small circle: its first three words (fewer for a short one) and "…".
   function teaser(t) {
     const words = t.split(/\s+/);
@@ -233,20 +257,23 @@
     renderText(now);
   }
   // Fades the question out and the new one in, or swaps it at once with reduced motion.
+  // now: at once, as for the arrow keys, stopping any fade under way so the question shows fully.
   function renderText(now = false) {
     const q = part("question");
+    if (!q) return;
     const shown = small ? teaser(text) : text;
-    if (!q || q.textContent === shown) return;
+    if (now && q.getAnimations) q.getAnimations().forEach((a) => a.cancel());
+    if (q.textContent === shown) return;
     if (now || calm() || area.hidden || !q.animate) { q.textContent = shown; return; }
     q.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 500, easing: "ease-in" }).finished.then(() => {
       q.textContent = small ? teaser(text) : text; // As it is by now
       q.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 700, easing: "ease-out" });
-    });
+    }, () => {}); // Cancelled by an arrow key, which shows its question itself
   }
   function setState(state) {
     if (!zone) return;
     zone.dataset.state = state;
-    part("hint").textContent = HINTS[state]();
+    part("hint").textContent = state === "listening" && window.ClaudeVoice?.listenPaused ? "" : HINTS[state]();
     showLinks();
   }
   // Small while a reply's large words show, at a clear spot (placeSpot); back home at full size after.
