@@ -2170,8 +2170,9 @@
   // other than Safari) or isn't working (sttFailed). What you say is recorded from the mic (the mic level's stream), cut
   // into turns where you pause (End of Your Turn, at least BRIDGE_PAUSE) and posted a turn at a time to the bridge's
   // .../transcribe as a 16 kHz WAV, which it turns into text with whisper.cpp on this computer or a cloud service
-  // (server/local-bridge.mjs). The text goes on as a spoken turn does. Only where the bridge says it can (transcriber, from
-  // .../status), so not on the deployed site, whose Worker has none. Speech to Text in the settings panel: Automatic (the
+  // (server/local-bridge.mjs). The text goes on as a spoken turn does. On the deployed site the Worker does the same with
+  // Whisper on Cloudflare (worker/claude-voice-api.js, its AI binding), with the team passphrase or the visitor's own key.
+  // Only where the bridge or Worker says it can (transcriber, from .../status). Speech to Text in the settings panel: Automatic (the
   // browser's own, and the bridge where that's missing or fails), Browser or Bridge.
   // It doesn't listen while Claude speaks or thinks, or for ECHO_TAIL after, since Claude's own voice isn't taken out of
   // it. Waiting for "Ok Claude" it listens only when the transcriber is on this computer; with a cloud service, a tap starts.
@@ -2214,7 +2215,12 @@
       queue = queue.then(() => transcribe(wav)).then(bridgeHeard).catch((err) => {
         console.warn('[claude-voice] speech to text through the bridge failed:', err.message);
         if (mode === 'listening') ui.user('');
-        ui.note(`Couldn’t turn what you said into text: ${err.message}`, 8000);
+        if (err.passphrase) { // The Worker's: once it's entered, what's said next goes through
+          passInMemory = ''; passJustTraded = false;
+          try { localStorage.removeItem(PASS_SET_KEY); } catch (e) { /* storage blocked */ }
+          ui.note(err.message, 12000);
+          ui.askPassphrase();
+        } else ui.note(`Couldn’t turn what you said into text: ${err.message}`, 8000);
       });
     }
     async function start() {
@@ -2267,10 +2273,16 @@
     new Int16Array(buf, 44).set(pcm);
     return new Blob([buf], { type: 'audio/wav' });
   }
+  // On the deployed site the Worker transcribes (Whisper on Cloudflare), with the team passphrase or the visitor's own
+  // key, as a conversation needs. A refusal asks for the passphrase.
   async function transcribe(wav) {
-    const res = await fetch(`${TRANSCRIBE_URL}?lang=${encodeURIComponent(cfg.lang)}`, { method: 'POST', headers: { 'content-type': 'audio/wav' }, body: wav });
+    const res = await fetch(`${TRANSCRIBE_URL}?lang=${encodeURIComponent(cfg.lang)}`, { method: 'POST', body: wav,
+      credentials: viaBridge ? 'same-origin' : 'include', // the passphrase's cookie
+      headers: { 'content-type': 'audio/wav',
+        ...(ownKey && { 'x-provider-name': ownKey.name, 'x-provider-key': ownKey.key }),
+        ...(passphrase() && { 'x-team-passphrase': passphrase() }) } });
     const j = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(j.error || `the bridge answered ${res.status}`);
+    if (!res.ok) throw Object.assign(new Error(j.error || `${viaBridge ? 'the bridge' : 'the server'} answered ${res.status}`), { passphrase: res.status === 401 && j.passphrase });
     return String(j.text || '').trim();
   }
   // What the bridge heard, taken as the browser's recognition takes a final result (onFinal), but sent at once.
@@ -2842,7 +2854,8 @@
     });
     setTimeout(() => check(5), 1500);
   }
-  // The bridge's view, which includes replies from other tabs. The Worker has none, which leaves the status as this page saw it.
+  // The bridge's view, which includes replies from other tabs. The Worker's tells only whether it can turn speech into
+  // text (worker: true), which leaves the status as this page saw it.
   async function checkAgent() {
     try {
       const res = await fetch(STATUS_URL, { cache: 'no-store' });
@@ -2853,6 +2866,7 @@
         transcriber = server.transcribe || null;
         showListening(); showState(); emit('stt', { via: viaBridgeStt ? transcriber && transcriber.name : SR ? 'browser' : 'none' });
       }
+      if (server.worker) server = null; // The deployed Worker's: only speech to text, no view of running replies
     } catch (e) { server = null; }
     showAgent();
   }

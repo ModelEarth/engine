@@ -92,7 +92,9 @@ The bridge picks a transcriber when it starts (`TRANSCRIBE=auto`), and its log s
 - **A cloud service:** an OpenAI-compatible `/audio/transcriptions` endpoint, used when there's no whisper.cpp. It needs `OPENAI_API_KEY`, or `TRANSCRIBE_API_KEY` with `TRANSCRIBE_URL` for another service such as Groq. `TRANSCRIBE_MODEL` defaults to `gpt-4o-mini-transcribe`.
 - `TRANSCRIBE=whisper`, `cloud` or `off` forces one choice.
 
-The deployed Worker has no transcriber, so there the widget uses the browser's speech input or typing, as before.
+**On the deployed site,** the Worker does the same with Whisper on Cloudflare's Workers AI (`@cf/openai/whisper-large-v3-turbo`), through an AI binding in the wrangler config (`[ai] binding = "AI"`, or `"ai": { "binding": "AI" }`). `GET /api/claude-voice/status` tells the page it's there, and `POST /api/claude-voice/transcribe` takes each turn. As with a conversation, it needs the team passphrase when one is set (the page asks for it), or the visitor's own key from the Keys page. A tap starts the conversation, since the audio goes to Cloudflare. Without the binding, the widget falls back to the browser's speech input or typing.
+
+`wrangler dev` reaches an AI binding only on Cloudflare itself, which needs a login, so CloudRoot's `npm run dev` runs it with `--local` (binding off). Locally, the bridge transcribes instead.
 
 ## Cloudflare (wrangler)
 
@@ -138,7 +140,7 @@ The script strips the header before speaking, and the visuals change before the 
 
 ## Browser notes
 
-- Voice input needs the Web Speech API: Chrome, Edge or Safari. Firefox gets a text box instead; the ⌨ button opens it in any browser.
+- Voice input uses the Web Speech API in Chrome, Edge and Safari. Brave and Firefox, which lack it, record what you say and have the bridge or the Worker turn it into text (see "Speech to text" above); without either, they get a text box. The ⌨ button opens it in any browser.
 - Browsers only allow speech output after a click or keypress on the page. Tap **Enable voice** once per visit; after that the wake phrase works hands-free. If the mic is already allowed, listening starts by itself.
 - While Claude is talking, the script only listens for "Thanks". Press Esc or tap the pill to interrupt.
 - Chrome's recognition uses Google's servers, so the page must be on `https` or `localhost`.
