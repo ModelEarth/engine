@@ -14,10 +14,18 @@ import { fileURLToPath } from 'node:url';
 // CLAUDE_MODEL is a plain var in wrangler.jsonc, so it is not pushed as a secret.
 const PUSH = ['ANTHROPIC_API_KEY', 'ALLOWED_ORIGINS'];
 
+// The env file: the first argument, else $VOICE_CHAT_ENV, else the one env_file: names in automation/paths.yaml, in
+// the webroot above this submodule (relative to that automation folder), as the site's other scripts use it.
+function pathsYamlEnv(webroot) {
+  const yaml = path.join(webroot, 'automation', 'paths.yaml');
+  if (!existsSync(yaml)) return null;
+  const m = readFileSync(yaml, 'utf8').match(/^env_file:\s*["']?([^"'#\n]+?)["']?\s*(#.*)?$/m);
+  return m ? path.resolve(webroot, 'automation', m[1].trim()) : null;
+}
 const here = path.dirname(fileURLToPath(import.meta.url));
-const candidates = [process.argv[2], process.env.CLAUDE_VOICE_ENV, path.resolve(here, '..', '..', '..', 'safe', 'cloudroot.env')].filter(Boolean);
+const candidates = [process.argv[2], process.env.VOICE_CHAT_ENV, pathsYamlEnv(path.resolve(here, '..', '..'))].filter(Boolean);
 const envFile = candidates.find((f) => existsSync(f));
-if (!envFile) { console.error('No .env found. Pass its path as the first argument.'); process.exit(1); }
+if (!envFile) { console.error('No .env found. Pass its path as the first argument, or name it in automation/paths.yaml (env_file:).'); process.exit(1); }
 
 const vars = {};
 for (const raw of readFileSync(envFile, 'utf8').split(/\r?\n/)) {

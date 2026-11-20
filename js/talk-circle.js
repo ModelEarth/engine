@@ -1,6 +1,6 @@
 /* Talk circle: a large see-through circle that pulses slowly and shows one brief question at a time in large
    type, for people to answer by voice, such as seniors and people living with dementia. A tap or click on it has
-   the voice widget (engine/claude-voice.js) ask the question aloud and listen for the answer, and Claude replies
+   the voice widget (engine/js/voice-chat.js) ask the question aloud and listen for the answer, and Claude replies
    warmly with a gentle follow-up. Without the voice widget, the browser just reads the question aloud. The left and
    right arrow keys move through the questions (arrowKeys).
    Styles are in engine/css/engine.css. Used by project/goals (above its tabs) and project/care (centered).
@@ -30,14 +30,14 @@
   const TALK_MAX = 440, TALK_MIN = 220; // The circle's largest diameter, and the smallest it shows at
   const TALK_CONTEXT = "I'm talking with you through the page's conversation circle, which asks brief, friendly questions for older adults, including people living with dementia. It's asking me the question that follows. When I answer, reply warmly in one or two short, simple sentences. Never correct me, quiz me or ask what I remember. Then ask one easy, open question about what I said. If I seem confused or upset, reassure me and gently change the subject.";
   const HINTS = {
-    idle: () => (answerAloud() ? "Tap the circle, then answer out loud" : typeof window.ClaudeVoice?.ask === "function" ? "Tap the circle, then type your answer below." + (speechBrowsers() && `\nFor speech input use\n${speechBrowsers()}.`) : "Tap the circle to hear the question"),
+    idle: () => (answerAloud() ? "Tap the circle, then answer out loud" : typeof window.VoiceChat?.ask === "function" ? "Tap the circle, then type your answer below." + (speechBrowsers() && `\nFor speech input use\n${speechBrowsers()}.`) : "Tap the circle to hear the question"),
     listening: () => (answerAloud() ? "I'm listening…" : "Type to respond…"),
     thinking: () => "One moment…",
     speaking: () => "",
     error: () => "Voice isn't available in this browser",
   };
 
-  // Whether Chrome's speech input works. It does once the microphone is allowed (engine/claude-voice.js, by SR):
+  // Whether Chrome's speech input works. It does once the microphone is allowed (engine/js/voice-chat.js, by SR):
   // then Chrome is asked for a spoken answer and suggested to browsers without speech input. False treats Chrome
   // on Mac as typing only (a typed answer, with Safari suggested), though the widget still listens there.
   const CHROME_SPEECH = true;
@@ -53,7 +53,7 @@
   }
   // The voice widget's answer when it's loaded. Brave has SpeechRecognition but turns off the service behind it, and
   // iOS browsers other than Safari have it without the permission to use it.
-  const canListen = () => (typeof window.ClaudeVoice?.canListen === "boolean" ? window.ClaudeVoice.canListen : !navigator.brave && !/CriOS|FxiOS|EdgiOS|OPiOS/.test(navigator.userAgent) && !!(window.SpeechRecognition || window.webkitSpeechRecognition));
+  const canListen = () => (typeof window.VoiceChat?.canListen === "boolean" ? window.VoiceChat.canListen : !navigator.brave && !/CriOS|FxiOS|EdgiOS|OPiOS/.test(navigator.userAgent) && !!(window.SpeechRecognition || window.webkitSpeechRecognition));
   // Whether the circle asks for a spoken answer: where the browser can listen, except Chrome on Mac without CHROME_SPEECH.
   const chromeMac = (() => {
     const brands = navigator.userAgentData?.brands;
@@ -85,7 +85,7 @@
   // (for Claude) and questions.
   function init(options = {}) {
     if (zone) return api;
-    opts = { avoid: ".claude-voice-ui", context: TALK_CONTEXT, ...options };
+    opts = { avoid: ".voice-chat-ui", context: TALK_CONTEXT, ...options };
     zone = el("button", { type: "button", class: "talk-circle", "data-state": "idle", "data-words-avoid": "" },
       el("span", { class: "talk-circle-question" }), el("span", { class: "talk-circle-hint" }), el("span", { class: "talk-circle-links" }));
     zone.addEventListener("click", ask);
@@ -98,7 +98,7 @@
     area.prepend(slot);
     if (!area.isConnected) (opts.parent || document.body).append(area);
     // The voice widget's events don't bubble up from its target (#fullscreen), so they're heard capturing.
-    document.addEventListener("claude-voice:state", (e) => {
+    document.addEventListener("voice-chat:state", (e) => {
       const st = e.detail?.state;
       watchWords();
       showLinks(); // Not needed once the widget has loaded
@@ -107,19 +107,19 @@
       if (st === "off" || st === "error") { setTalking(false); setState(st === "error" ? "error" : "idle"); syncTimer(); }
       else if (HINTS[st]) setState(st);
       // Without voice input, the cursor goes in the widget's typing box for the answer.
-      if (st === "listening" && !answerAloud() && typeof window.ClaudeVoice?.focusInput === "function") window.ClaudeVoice.focusInput();
+      if (st === "listening" && !answerAloud() && typeof window.VoiceChat?.focusInput === "function") window.VoiceChat.focusInput();
     }, true);
-    document.addEventListener("claude-voice:reply", (e) => {
+    document.addEventListener("voice-chat:reply", (e) => {
       if (!talking) return;
       const q = (String(e.detail?.text || "").match(/[^.!?]*\?/g) || []).pop()?.trim();
       if (q && q.length <= 140) showText(q);
     }, true);
     // Once the widget knows whether it can listen through the bridge (speech to text for browsers without their own),
     // the hint asks for a spoken or typed answer to match.
-    document.addEventListener("claude-voice:stt", () => { if (!talking) setState("idle"); }, true);
+    document.addEventListener("voice-chat:stt", () => { if (!talking) setState("idle"); }, true);
     // While the widget's pause button holds listening, the circle doesn't say it's listening.
-    document.addEventListener("claude-voice:pause", () => { if (zone?.dataset.state === "listening") setState("listening"); }, true);
-    document.addEventListener("claude-voice:end", () => {
+    document.addEventListener("voice-chat:pause", () => { if (zone?.dataset.state === "listening") setState("listening"); }, true);
+    document.addEventListener("voice-chat:end", () => {
       if (!talking) return;
       setTalking(false);
       setState("idle");
@@ -153,7 +153,7 @@
   function showLinks() {
     const links = part("links");
     if (!links) return;
-    if (!local || zone.dataset.state !== "idle" || typeof window.ClaudeVoice?.ask === "function") { links.replaceChildren(); return; }
+    if (!local || zone.dataset.state !== "idle" || typeof window.VoiceChat?.ask === "function") { links.replaceChildren(); return; }
     const path = location.pathname + location.search + location.hash;
     // A tap on a link follows it, without the circle asking its question too.
     const link = (origin, label) => {
@@ -162,7 +162,7 @@
       return a;
     };
     portCheck().then((up) => {
-      if (zone.dataset.state !== "idle" || typeof window.ClaudeVoice?.ask === "function") return;
+      if (zone.dataset.state !== "idle" || typeof window.VoiceChat?.ask === "function") return;
       links.replaceChildren(...(up
         ? ["Interact on ", link(`http://${location.hostname}:${LOCAL_PORT}`, String(LOCAL_PORT)), " or ", link("https://neighborhood.org", "Neighborhood.org")]
         : ["Interact at ", link("https://neighborhood.org", "Neighborhood.org"), " or ", link("https://cloud.model.earth", "cloud.model.earth")]));
@@ -172,12 +172,12 @@
   // The large words (.w) arriving in the voice widget's word layer shrink the circle. The layer is
   // the widget's own, in #fullscreen, found once the widget's first event shows it's loaded.
   function watchWords() {
-    const field = document.querySelector("#fullscreen > .claude-voice-words")?.shadowRoot?.querySelector(".field");
+    const field = document.querySelector("#fullscreen > .voice-chat-words")?.shadowRoot?.querySelector(".field");
     if (!field || field === wordsField) return;
     wordsField = field;
     new MutationObserver((list) => {
       if (!list.some((m) => [...m.addedNodes].some((n) => n.classList?.contains("w")))) return;
-      if (window.ClaudeVoice?.state === "speaking") setSmall(true);
+      if (window.VoiceChat?.state === "speaking") setSmall(true);
       if (!dimFrame) dimFrame = requestAnimationFrame(dimWords);
     }).observe(field, { childList: true });
   }
@@ -273,7 +273,7 @@
   function setState(state) {
     if (!zone) return;
     zone.dataset.state = state;
-    part("hint").textContent = state === "listening" && window.ClaudeVoice?.listenPaused ? "" : HINTS[state]();
+    part("hint").textContent = state === "listening" && window.VoiceChat?.listenPaused ? "" : HINTS[state]();
     showLinks();
   }
   // Small while a reply's large words show, at a clear spot (placeSpot); back home at full size after.
@@ -329,12 +329,12 @@
   function ask() {
     const q = question();
     if (!q) return;
-    if (typeof window.ClaudeVoice?.ask === "function") {
+    if (typeof window.VoiceChat?.ask === "function") {
       setTalking(true);
       asked = q;
       syncTimer();
       setSmall(false);
-      window.ClaudeVoice.ask(q, opts.context); // Stops a reply under way
+      window.VoiceChat.ask(q, opts.context); // Stops a reply under way
     } else if (window.speechSynthesis) {
       speechSynthesis.cancel();
       speechSynthesis.speak(new SpeechSynthesisUtterance(q));

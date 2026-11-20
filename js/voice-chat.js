@@ -1,8 +1,8 @@
 /*!
- * claude-voice.js — talk to Claude by voice from any static page.
+ * voice-chat.js — talk to Claude by voice from any static page.
  *
  *   <div id="stage"> ...your content... </div>
- *   <script src="/engine/claude-voice.js" data-target="#stage" defer></script>
+ *   <script src="/engine/js/voice-chat.js" data-target="#stage" defer></script>
  *
  * Say "Ok Claude" (optionally followed by your question) to start. Claude keeps answering
  * until you say "Thanks". The target div's background becomes a living canvas whose colours
@@ -10,7 +10,7 @@
  *
  * Script attributes (all optional):
  *   data-target        CSS selector of the div to animate (default: the script's parent div, else <body>)
- *   data-endpoint      API URL (default: local bridge on localhost, else /api/claude-voice on the site this script came
+ *   data-endpoint      API URL (default: local bridge on localhost, else /api/voice-chat on the site this script came
  *                      from, such as neighborhood.org for a page on another site that loads localsite from there)
  *   data-bridge-port   port of server/local-bridge.mjs (default 3703)
  *   data-lang          speech language (default: page lang or en-US)
@@ -22,7 +22,7 @@
  *   data-ui-place      "corner" (the target's lower right, default) or "side" (fixed at the window's right side, below
  *                      the middle, clear of controls in the target's lower right, such as the Earth map's)
  *   data-ui-bottom     px between the controls and the bottom edge (default 16)
- *                      The controls (.claude-voice-ui) carry a data-open attribute while anything shows above their row
+ *                      The controls (.voice-chat-ui) carry a data-open attribute while anything shows above their row
  *                      (captions, the typing box, settings or the opened play pill), so the page can make room for it.
  *   data-idle-timeout  seconds of silence before a conversation ends on its own (default 120)
  *   data-agent-name    the agent's name as shown, or a comma-separated list ("Little Bird, Sparrow") whose first is shown
@@ -49,7 +49,7 @@
  *                      "interest rates", so they float as one). Default: "conversation align words sets". The panel overrides
  *                      this and remembers the choices in this browser.
  *   data-autostart    "false" to wait for a click even when the mic is already allowed
- * The ⚙ panel's Listening choices, remembered in this browser (claude-voice:listening): Hear Me While Claude Speaks (on
+ * The ⚙ panel's Listening choices, remembered in this browser (voice-chat:listening): Hear Me While Claude Speaks (on
  * by default) keeps the mic on while Claude talks, leaving out Claude's own words as the mic hears them, so what you say
  * at the same time is kept and Claude listens until you stop; End of Your Turn, the pause that sends what you said
  * (0.8 s by default); and Mic Back After Claude, how long the mic waits after Claude speaks when it's off meanwhile.
@@ -65,7 +65,7 @@
  * several, comma-separated) opens that list too, and the Keys button in the settings panel's Agent section adds it.
  * The Conversation box (Important Text) has a ⋯ menu: Expand shows the last reply in full again (Shrink hides it), and
  * Choose lists past conversations, or Show All for every one's text at once. They're kept in this browser's localStorage
- * (claude-voice:conversations, the last 50), apart from the page's own framing of a question it asks (ask's context).
+ * (voice-chat:conversations, the last 50), apart from the page's own framing of a question it asks (ask's context).
  * The box shows while Claude is paused, even with Important Text off. A small light bulb in the reply's upper right shows
  * the reply's extras above its text, in the same box: Claude's thinking (when the model thinks), tags the agent opened
  * with, the mood header, tool calls written into the reply as text (taken out of what's shown and said), the tools used
@@ -73,24 +73,24 @@
  * typing box. Each reply's extras are kept with it (thinking cut to its first 2,000 characters), so replies chosen from
  * the ⋯ menu have their own light bulbs. Choosing a conversation brings back the mood of its last reply (the colors
  * and motion), and a reply's light bulb brings back that reply's mood.
- * API: window.ClaudeVoice.{start, stop, say, ask, focusInput, hideText, end, interrupt, setMood, clearWords, pauseAudio, pauseMotion, openKeys, on}
- * Events (claude-voice:<type> on the widget's host, or ClaudeVoice.on(type)): state, start, reply, mood, end, and pause
+ * API: window.VoiceChat.{start, stop, say, ask, focusInput, hideText, end, interrupt, setMood, clearWords, pauseAudio, pauseMotion, openKeys, on}
+ * Events (voice-chat:<type> on the widget's host, or VoiceChat.on(type)): state, start, reply, mood, end, and pause
  * ({ audio, motion, listening }: which are paused, after the pause button or a change to listening's pause).
  */
 (function () {
   'use strict';
-  if (window.ClaudeVoice) return;
+  if (window.VoiceChat) return;
 
   // ------------------------------------------------------------------ config
-  const script = document.currentScript || document.querySelector('script[src*="claude-voice"]');
+  const script = document.currentScript || document.querySelector('script[src*="voice-chat"]');
   const ds = (script && script.dataset) || {};
   const isLocal = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || location.hostname.endsWith('.localhost');
   const bridgePort = String(ds.bridgePort || 3703);
   const scriptOrigin = (() => { try { return new URL(script.src).origin; } catch (e) { return location.origin; } })();
   const cfg = {
     endpoint: ds.endpoint || (isLocal && location.port !== bridgePort
-      ? `http://127.0.0.1:${bridgePort}/api/claude-voice`
-      : (scriptOrigin === location.origin ? '' : scriptOrigin) + '/api/claude-voice'),
+      ? `http://127.0.0.1:${bridgePort}/api/voice-chat`
+      : (scriptOrigin === location.origin ? '' : scriptOrigin) + '/api/voice-chat'),
     lang: ds.lang || document.documentElement.lang || 'en-US',
     voice: ds.voice || '',
     voiceMode: ds.voiceMode || '',
@@ -102,7 +102,7 @@
   };
   // The agent's names: data-agent-name, a comma-separated list (agent_name in the site's entry in support/site/config.yaml,
   // passed by localsite.js), such as "Little Bird, Sparrow". The first is the name shown ("Say “Ok Little Bird”") and any
-  // of them starts a conversation. Claude without one. ClaudeVoice.setNames() changes them once the widget is up.
+  // of them starts a conversation. Claude without one. VoiceChat.setNames() changes them once the widget is up.
   const parseNames = (v) => String(v || '').split(',').map((n) => n.trim()).filter(Boolean);
   let agentNames = parseNames(ds.agentName);
   if (!agentNames.length) agentNames = ['Claude'];
@@ -159,7 +159,7 @@
   function Scene(host) {
     const canvas = document.createElement('canvas');
     canvas.setAttribute('aria-hidden', 'true');
-    canvas.className = 'claude-voice-canvas';
+    canvas.className = 'voice-chat-canvas';
     Object.assign(canvas.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', zIndex: '-1', pointerEvents: 'none', borderRadius: 'inherit', display: 'block' });
     const cs = getComputedStyle(host);
     if (cs.position === 'static') host.style.position = 'relative';
@@ -673,7 +673,7 @@
     const PAD = 18; // clear space kept around each word, a little more than its drift
     const TOP = 90; // words and the statement stay this far below the target's top, clear of headers and controls there
     const layer = document.createElement('div');
-    layer.className = 'claude-voice-words';
+    layer.className = 'voice-chat-words';
     // Each word and statement is aria-hidden, since the captions already carry them for screen readers. A button among
     // them (phrases()) isn't.
     // z-index 1: over content without one, such as a map's iframe (data-words-stay), and under its controls, which have their own.
@@ -729,7 +729,7 @@
     const pageEls = () => (ds.wordsReplace ? [...document.querySelectorAll(ds.wordsReplace)]
       : host === document.body ? []
       : [...host.children].filter((c) => c !== layer && c.tagName !== 'SCRIPT' && !c.hasAttribute('data-words-stay')
-        && !/\bclaude-voice-/.test(c.getAttribute('class') || '')));
+        && !/\bvoice-chat-/.test(c.getAttribute('class') || '')));
     const showPage = (on) => pageEls().forEach((c) => { c.style.transition = 'opacity .6s ease'; c.style.opacity = on ? '' : (c.dataset.wordsDim || '0'); });
     const span = () => Math.min(layer.clientWidth, layer.clientHeight * 1.6);
     // While motion is paused, words still come and go, but without moving: entrances and exits jump to their end, and the drift holds.
@@ -992,7 +992,7 @@
     if (cfg.ui === 'none') return { setState() {}, user() {}, claude() {}, extras() {}, important() {}, note() {}, fade() {}, showInput() {}, askPassphrase() {}, setVoices() {}, setVoiceMode() {}, setVoiceInfo() {}, setTextOutput() {}, setListening() {}, setPaused() {}, setAgent() {}, addInput() {}, hideText() {}, rename() {}, boxes: () => [], play: null };
     let play = ds.playButton ? document.querySelector(ds.playButton) : null;
     const el = document.createElement('div');
-    el.className = 'claude-voice-ui';
+    el.className = 'voice-chat-ui';
     // At the side, the controls go in <body> so they show even where the target is covered or hidden.
     if (ds.uiPlace === 'side') host = document.body;
     Object.assign(el.style, { position: host === document.body ? 'fixed' : 'absolute', right: '16px', bottom: ds.uiPlace === 'side' ? '30vh' : `${Number(ds.uiBottom) || 16}px`, zIndex: '2147483000', maxWidth: 'min(440px, calc(100% - 32px))' });
@@ -1613,7 +1613,7 @@
   const listeners = {};
   const emit = (type, detail) => {
     (listeners[type] || []).forEach((fn) => { try { fn(detail); } catch (e) { console.error(e); } });
-    host.dispatchEvent(new CustomEvent('claude-voice:' + type, { detail }));
+    host.dispatchEvent(new CustomEvent('voice-chat:' + type, { detail }));
   };
 
   // Brave exposes SpeechRecognition but disables the service behind it, so every attempt ends in a "network" error.
@@ -1835,7 +1835,7 @@
       const mac = /mac/i.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '');
       const where = mac ? 'System Settings > Privacy & Security > Microphone' : 'your system’s privacy settings';
       const browser = isBrave ? 'Brave' : /Edg\//.test(navigator.userAgent) ? 'Edge' : /Chrome\//.test(navigator.userAgent) ? 'Chrome' : 'this browser';
-      console.warn(`[claude-voice] the microphone gives only silence: the system isn't letting ${browser} use it (${where})`);
+      console.warn(`[voice-chat] the microphone gives only silence: the system isn't letting ${browser} use it (${where})`);
       ui.note(`${browser} gets only silence from the microphone. Turn on ${browser} in ${where}, then quit and reopen ${browser}. You can type to ${shownName()} meanwhile.`, 20000);
       ui.showInput();
     };
@@ -1843,7 +1843,7 @@
   }
 
   // The settings panel's choices are remembered in this browser and win over data-voice / data-voice-mode.
-  const VOICE_KEY = 'claude-voice:voice', MODE_KEY = 'claude-voice:voice-mode';
+  const VOICE_KEY = 'voice-chat:voice', MODE_KEY = 'voice-chat:voice-mode';
   let voiceMode = VOICE_MODES.includes(cfg.voiceMode) ? cfg.voiceMode : (cfg.voice ? 'chosen' : 'response');
   let chosenVoice = '', currentURI = '';
   try {
@@ -1898,7 +1898,7 @@
   // in IndexedDB ("km-store"). "rsa:" ones only the server can read, so they're sent as they are.
   const KEYS_PAGE = (scriptOrigin === location.origin ? '' : scriptOrigin) + '/keys/'; // on the site this script came from
   const KEY_PHRASES = ['Please enter your LLM Key', 'Get Started', 'One Big Adventure']; // floated as Large Words while a key is needed
-  // The /keys page's provider ids that can hold a conversation (worker/claude-voice-api.js OWN_PROVIDERS), in order.
+  // The /keys page's provider ids that can hold a conversation (worker/voice-chat-api.js OWN_PROVIDERS), in order.
   const OWN_LABEL = { anthropic: 'Claude', google: 'Gemini', openai: 'OpenAI', xai: 'xAI', groq: 'Groq', perplexity: 'Perplexity', pollinations: 'Pollinations' };
   let ownKey = null;              // { name, key } while this page answers with the visitor's own key
   const failedOwnKeys = new Set(); // saved keys that already failed, so they aren't tried again until changed
@@ -1945,39 +1945,39 @@
     if (!document.querySelector(`link[href="${KEYS_PAGE}style.css"]`)) {
       document.head.appendChild(Object.assign(document.createElement('link'), { rel: 'stylesheet', href: KEYS_PAGE + 'style.css' }));
     }
-    if (document.getElementById('claude-voice-keys-style')) return;
+    if (document.getElementById('voice-chat-keys-style')) return;
     const style = document.createElement('style');
-    style.id = 'claude-voice-keys-style';
+    style.id = 'voice-chat-keys-style';
     style.textContent = `
-      .claude-voice-keys { box-sizing: border-box; padding: 16px 18px 20px; border-radius: 12px; overflow: auto;
+      .voice-chat-keys { box-sizing: border-box; padding: 16px 18px 20px; border-radius: 12px; overflow: auto;
         background: var(--key-bg, #fff); color: var(--key-text, #111827); font-family: var(--key-font, system-ui, sans-serif);
         box-shadow: 0 12px 48px rgba(0, 0, 0, .35); }
-      .claude-voice-keys.over { position: absolute; z-index: 2147482000; top: 24px; max-height: calc(100% - 96px);
+      .voice-chat-keys.over { position: absolute; z-index: 2147482000; top: 24px; max-height: calc(100% - 96px);
         left: max(16px, calc((100% - 1120px) / 2 + 16px)); width: calc((min(100%, 1120px) - 32px) * 2 / 3); }
-      body > .claude-voice-keys.over { position: fixed; top: 80px; max-height: calc(100vh - 160px); }
-      .claude-voice-keys.inpage { margin-bottom: var(--gap, 16px); }
-      @media (max-width: 700px) { .claude-voice-keys.over { width: calc(100% - 32px); } }
-      .claude-voice-keys-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
-      .claude-voice-keys-head h2 { margin: 0; padding: 0; border: 0; font-size: 22px; font-weight: 650; line-height: 1.25; color: inherit; }
-      .claude-voice-keys-head p { margin: 4px 0 0; font-size: 14px; color: var(--key-text-muted, #6b7280); }
-      .claude-voice-keys-close { flex: none; width: 34px; height: 34px; border: 1px solid var(--key-border, #e5e7eb); border-radius: 50%;
+      body > .voice-chat-keys.over { position: fixed; top: 80px; max-height: calc(100vh - 160px); }
+      .voice-chat-keys.inpage { margin-bottom: var(--gap, 16px); }
+      @media (max-width: 700px) { .voice-chat-keys.over { width: calc(100% - 32px); } }
+      .voice-chat-keys-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+      .voice-chat-keys-head h2 { margin: 0; padding: 0; border: 0; font-size: 22px; font-weight: 650; line-height: 1.25; color: inherit; }
+      .voice-chat-keys-head p { margin: 4px 0 0; font-size: 14px; color: var(--key-text-muted, #6b7280); }
+      .voice-chat-keys-close { flex: none; width: 34px; height: 34px; border: 1px solid var(--key-border, #e5e7eb); border-radius: 50%;
         background: var(--key-bg-subtle, #f9fafb); color: inherit; font-size: 20px; line-height: 1; cursor: pointer; }
-      .claude-voice-keys-close:hover { background: var(--key-bg-hover, #f3f4f6); }`;
+      .voice-chat-keys-close:hover { background: var(--key-bg-hover, #f3f4f6); }`;
     document.head.appendChild(style);
   }
   async function openKeysPanel() {
-    if (keysPanel) { keysPanel.querySelector('.claude-voice-keys-close').focus(); return; }
+    if (keysPanel) { keysPanel.querySelector('.voice-chat-keys-close').focus(); return; }
     const filterCatch = document.getElementById('earthFilterCatch');
     const panel = keysPanel = document.createElement('section');
-    panel.className = 'claude-voice-keys ' + (filterCatch ? 'inpage' : 'over');
+    panel.className = 'voice-chat-keys ' + (filterCatch ? 'inpage' : 'over');
     panel.setAttribute('aria-label', 'Set My Keys');
     panel.innerHTML = `
-      <div class="claude-voice-keys-head">
+      <div class="voice-chat-keys-head">
         <div><h2>Set My Keys</h2><p>Add an AI key (Claude, Gemini, OpenAI and others) to talk here. Your keys stay in this browser.</p></div>
-        <button type="button" class="claude-voice-keys-close" aria-label="Close" title="Close">×</button>
+        <button type="button" class="voice-chat-keys-close" aria-label="Close" title="Close">×</button>
       </div>
-      <div class="claude-voice-keys-list">Loading…</div>`;
-    const close = panel.querySelector('.claude-voice-keys-close'), list = panel.querySelector('.claude-voice-keys-list');
+      <div class="voice-chat-keys-list">Loading…</div>`;
+    const close = panel.querySelector('.voice-chat-keys-close'), list = panel.querySelector('.voice-chat-keys-list');
     close.addEventListener('click', closeKeysPanel);
     panel.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeKeysPanel(); } });
     addKeysStyles();
@@ -2036,7 +2036,7 @@
 
   // Text Output, also in the settings panel: which kinds of text show (data-text-output, then this browser's choices).
   // Important Text and Precise Word Sets each add rules to Claude's prompt (shared/voice-prompt.js), so they're asked for only when on.
-  const TEXT_KEY = 'claude-voice:text-output', TEXT_KINDS = ['conversation', 'important', 'align', 'words', 'sets'];
+  const TEXT_KEY = 'voice-chat:text-output', TEXT_KINDS = ['conversation', 'important', 'align', 'words', 'sets'];
   const textOut = (() => {
     const on = ds.textOutput === undefined ? ['conversation', 'align', 'words', 'sets'] : ds.textOutput.toLowerCase().split(/[\s,]+/);
     return Object.fromEntries(TEXT_KINDS.map((k) => [k, on.includes(k)]));
@@ -2058,7 +2058,7 @@
   const wakeByVoice = () => (viaBridgeStt ? !!(transcriber && transcriber.local) : !!SR);
 
   // Listening, also in the settings panel (the header's notes): remembered in this browser.
-  const LISTEN_KEY = 'claude-voice:listening';
+  const LISTEN_KEY = 'voice-chat:listening';
   const listenOpt = { overlap: true, endPause: 800, micBack: 700, stt: 'auto' };
   try {
     const saved = JSON.parse(localStorage.getItem(LISTEN_KEY) || 'null');
@@ -2136,7 +2136,7 @@
       rec.onerror = (e) => {
         // "aborted" is this page stopping it, so it's only a debug line; "no-speech", which comes every few seconds in a
         // quiet room, is warned of once until something is heard again (onResult).
-        const why = `[claude-voice] speech recognition error: ${e.error}${e.message ? ` (${e.message})` : ''} - ${REC_ERRORS[e.error] || 'unknown'}`;
+        const why = `[voice-chat] speech recognition error: ${e.error}${e.message ? ` (${e.message})` : ''} - ${REC_ERRORS[e.error] || 'unknown'}`;
         if (e.error === 'aborted') console.debug(why);
         else if (e.error !== 'no-speech' || !noSpeechWarned) console.warn(why);
         if (e.error === 'no-speech') noSpeechWarned = true;
@@ -2171,7 +2171,7 @@
   // into turns where you pause (End of Your Turn, at least BRIDGE_PAUSE) and posted a turn at a time to the bridge's
   // .../transcribe as a 16 kHz WAV, which it turns into text with whisper.cpp on this computer or a cloud service
   // (server/local-bridge.mjs). The text goes on as a spoken turn does. On the deployed site the Worker does the same with
-  // Whisper on Cloudflare (worker/claude-voice-api.js, its AI binding), with the team passphrase or the visitor's own key.
+  // Whisper on Cloudflare (worker/voice-chat-api.js, its AI binding), with the team passphrase or the visitor's own key.
   // Only where the bridge or Worker says it can (transcriber, from .../status). Speech to Text in the settings panel: Automatic (the
   // browser's own, and the bridge where that's missing or fails), Browser or Bridge.
   // It doesn't listen while Claude speaks or thinks, or for ECHO_TAIL after, since Claude's own voice isn't taken out of
@@ -2213,7 +2213,7 @@
       const wav = toWav(got, rate);
       if (mode === 'listening') ui.user('…');
       queue = queue.then(() => transcribe(wav)).then(bridgeHeard).catch((err) => {
-        console.warn('[claude-voice] speech to text through the bridge failed:', err.message);
+        console.warn('[voice-chat] speech to text through the bridge failed:', err.message);
         if (mode === 'listening') ui.user('');
         if (err.passphrase) { // The Worker's: once it's entered, what's said next goes through
           passInMemory = ''; passJustTraded = false;
@@ -2238,7 +2238,7 @@
         reset(); on = true;
         return true;
       } catch (err) {
-        console.warn('[claude-voice] recording for the bridge failed:', err.name, err.message);
+        console.warn('[voice-chat] recording for the bridge failed:', err.name, err.message);
         return err && (err.name === 'NotAllowedError' || err.name === 'SecurityError') ? 'denied' : false;
       }
     }
@@ -2308,7 +2308,7 @@
         return false;
       }
       if (note) ui.note(note, 9000);
-      console.info(`[claude-voice] speech to text through the bridge: ${transcriber.name} (${transcriber.model})`);
+      console.info(`[voice-chat] speech to text through the bridge: ${transcriber.name} (${transcriber.model})`);
     } else {
       bridgeRec.stop(); viaBridgeStt = false;
       if (SR) startRecognition();
@@ -2459,7 +2459,7 @@
 
   // --- past conversations, for the Conversation box's menu: newest first, each with its title (the first thing said) and
   // its turns as shown. Read again before each save, so other tabs' conversations are kept.
-  const LOG_KEY = 'claude-voice:conversations', LOG_MAX = 50;
+  const LOG_KEY = 'voice-chat:conversations', LOG_MAX = 50;
   let logged = null; // this conversation's entry, made at its first turn
   function readLog() {
     try { const l = JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); return Array.isArray(l) ? l.filter((c) => c && Array.isArray(c.turns)) : []; } catch (e) { return []; }
@@ -2610,7 +2610,7 @@
       if (!place) return;
       // A new state or country drops the county; a county sets its state too.
       window.goHash(place, place.geo ? [] : ['geo']);
-    }).catch((err) => console.warn('[claude-voice] place', err));
+    }).catch((err) => console.warn('[voice-chat] place', err));
   }
 
   function handleUtterance(text) {
@@ -2757,7 +2757,7 @@
       passJustTraded = false;
     } catch (err) {
       if (ctl.signal.aborted) return;
-      console.warn('[claude-voice]', err);
+      console.warn('[voice-chat]', err);
       let msg = /Failed to fetch|NetworkError|Load failed/i.test(err.message)
         ? (isLocal ? 'I can’t reach the local bridge. Start it with: node engine/server/local-bridge.mjs' : 'I can’t reach the server right now.')
         : err.message;
@@ -2988,7 +2988,7 @@
     navigator.permissions.query({ name: 'microphone' }).then((p) => { if (p.state === 'granted') start(); }).catch(() => {});
   }
 
-  window.ClaudeVoice = {
+  window.VoiceChat = {
     start, stop, interrupt,
     /** The words, summary and important text stay up after a conversation ends, until the next reply; this clears them sooner. */
     clearWords: () => { wordField.clear(); ui.important(''); },

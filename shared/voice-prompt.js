@@ -1,11 +1,11 @@
-// Shared by server/local-bridge.mjs (Node) and worker/claude-voice-api.js (Cloudflare).
+// Shared by server/local-bridge.mjs (Node) and worker/voice-chat-api.js (Cloudflare).
 // Keeps the voice persona and the mood-header contract in one place.
 
 export const DEFAULT_MODEL = 'claude-opus-5-5';
 
 export const PATTERNS = ['orbs', 'waves', 'stars', 'rain', 'sparks', 'spiral', 'grid', 'petals'];
 
-// Delivery styles for the "Change for response" voice mode; claude-voice.js maps each to suitable voices (VOICE_STYLES there).
+// Delivery styles for the "Change for response" voice mode; voice-chat.js maps each to suitable voices (VOICE_STYLES there).
 export const VOICE_STYLES = ['warm', 'bright', 'calm', 'authoritative', 'playful', 'storyteller'];
 
 export const SYSTEM_PROMPT = `You are Claude, speaking aloud through a voice interface on a web page.
@@ -38,7 +38,7 @@ Spoken reply rules:
 - Speech recognition can mishear words; infer the most likely meaning rather than commenting on typos.
 - The person ends the conversation by saying "thanks", so do not ask whether they need anything else.`;
 
-// Added for the "Text Output" choices in claude-voice.js's settings panel (the request's "output" field).
+// Added for the "Text Output" choices in voice-chat.js's settings panel (the request's "output" field).
 const IMPORTANT_RULES = `
 
 Every reply MUST also have exactly one important tag on its own line, after the spoken reply and before the summary:

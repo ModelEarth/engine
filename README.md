@@ -1,4 +1,4 @@
-# claude-voice
+# voice-chat
 
 Talk to Claude Opus 5.5 by voice from a static page.
 
@@ -8,12 +8,12 @@ Talk to Claude Opus 5.5 by voice from a static page.
 
 ```
 engine/                        ← this submodule, inside your webroot
-  claude-voice.js              ← the only file the page loads
+  js/voice-chat.js             ← the only file the page loads
   demo.html
   shared/                      ← system prompt + Claude API streaming (used by both servers)
   server/local-bridge.mjs      ← localhost: Claude Code CLI (or API) bridge
   server/push-secrets.mjs      ← copies keys from .env to Cloudflare secrets
-  worker/claude-voice-api.js   ← Cloudflare Worker endpoint
+  worker/voice-chat-api.js     ← Cloudflare Worker endpoint
   worker/wrangler.example.jsonc
   .env.example
   assetsignore.example
@@ -23,15 +23,15 @@ engine/                        ← this submodule, inside your webroot
 
 ```html
 <div id="stage"> …your content… </div>
-<script src="/engine/claude-voice.js" data-target="#stage" defer></script>
+<script src="/engine/js/voice-chat.js" data-target="#stage" defer></script>
 ```
 
 The script never holds a key. It decides where to send requests based on where the page is running:
 
 | Page served from | Requests go to | Answered by |
 |---|---|---|
-| `localhost` / `127.0.0.1` (any port) | `http://127.0.0.1:3703/api/claude-voice` | Local bridge, using the **Claude Code CLI** |
-| Anywhere else (Cloudflare) | `/api/claude-voice` on the same site | Worker, using the **Claude API** key |
+| `localhost` / `127.0.0.1` (any port) | `http://127.0.0.1:3703/api/voice-chat` | Local bridge, using the **Claude Code CLI** |
+| Anywhere else (Cloudflare) | `/api/voice-chat` on the same site | Worker, using the **Claude API** key |
 
 The same rule covers `wrangler dev`: on `localhost:8787` the page still uses the CLI bridge. You can override the endpoint with `data-endpoint`.
 
@@ -51,10 +51,12 @@ The script also exposes the palette as CSS variables on the target: `--cv-c1`, `
 
 ## Keys: `.env`
 
-Copy `.env.example` to `../../safe/cloudroot.env`, relative to this submodule (the same file `automation/paths.yaml` names), so it sits outside the webroot. The bridge reads:
+Copy `.env.example` to the env file that `automation/paths.yaml` names in the webroot above this submodule (`env_file:`, relative to the automation folder), the same file the site's other scripts use. Keep it outside the webroot. The bridge and `push-secrets.mjs` read:
 
-1. `$CLAUDE_VOICE_ENV`, if set
-2. otherwise `../../safe/cloudroot.env`
+1. `$VOICE_CHAT_ENV`, if set in the shell (optional, for a different env file)
+2. otherwise the file `env_file:` names in `automation/paths.yaml`
+
+`push-secrets.mjs` also takes the path as its first argument, ahead of both.
 
 It prints a warning if the `.env` it finds is inside the webroot. A `.env` in the webroot can be served by other static servers or uploaded by `wrangler deploy`. If you must keep it there, copy `assetsignore.example` to `<webroot>/.assetsignore`.
 
@@ -77,7 +79,7 @@ How the bridge runs each turn:
 
 ### Speech to text for browsers without working speech input
 
-Brave, Firefox and iOS browsers other than Safari have no speech input, and Chrome's sometimes hears nothing. For these, the widget can record what you say and send it to the bridge, which turns it into text. Each turn ends at a pause and goes to `POST /api/claude-voice/transcribe` as a 16 kHz WAV. The text then goes to `claude -p` like any spoken turn.
+Brave, Firefox and iOS browsers other than Safari have no speech input, and Chrome's sometimes hears nothing. For these, the widget can record what you say and send it to the bridge, which turns it into text. Each turn ends at a pause and goes to `POST /api/voice-chat/transcribe` as a 16 kHz WAV. The text then goes to `claude -p` like any spoken turn.
 
 - **Automatic (default):** the widget uses the browser's own speech input. It switches to the bridge when that's missing or fails: "service-not-allowed", repeated "network" errors, or nothing ever heard during a conversation. Speech to Text in the settings panel's Listening section can also be set to Browser or Bridge.
 - **When it listens:** not while Claude speaks or thinks. To start, you say "Ok Claude" when the transcriber runs on this computer. With a cloud service, a tap starts the conversation instead, so audio isn't sent to the cloud all the time.
@@ -92,7 +94,7 @@ The bridge picks a transcriber when it starts (`TRANSCRIBE=auto`), and its log s
 - **A cloud service:** an OpenAI-compatible `/audio/transcriptions` endpoint, used when there's no whisper.cpp. It needs `OPENAI_API_KEY`, or `TRANSCRIBE_API_KEY` with `TRANSCRIBE_URL` for another service such as Groq. `TRANSCRIBE_MODEL` defaults to `gpt-4o-mini-transcribe`.
 - `TRANSCRIBE=whisper`, `cloud` or `off` forces one choice.
 
-**On the deployed site,** the Worker does the same with Whisper on Cloudflare's Workers AI (`@cf/openai/whisper-large-v3-turbo`), through an AI binding in the wrangler config (`[ai] binding = "AI"`, or `"ai": { "binding": "AI" }`). `GET /api/claude-voice/status` tells the page it's there, and `POST /api/claude-voice/transcribe` takes each turn. As with a conversation, it needs the team passphrase when one is set (the page asks for it), or the visitor's own key from the Keys page. A tap starts the conversation, since the audio goes to Cloudflare. Without the binding, the widget falls back to the browser's speech input or typing.
+**On the deployed site,** the Worker does the same with Whisper on Cloudflare's Workers AI (`@cf/openai/whisper-large-v3-turbo`), through an AI binding in the wrangler config (`[ai] binding = "AI"`, or `"ai": { "binding": "AI" }`). `GET /api/voice-chat/status` tells the page it's there, and `POST /api/voice-chat/transcribe` takes each turn. As with a conversation, it needs the team passphrase when one is set (the page asks for it), or the visitor's own key from the Keys page. A tap starts the conversation, since the audio goes to Cloudflare. Without the binding, the widget falls back to the browser's speech input or typing.
 
 `wrangler dev` reaches an AI binding only on Cloudflare itself, which needs a login, so CloudRoot's `npm run dev` runs it with `--local` (binding off). Locally, the bridge transcribes instead.
 
@@ -101,8 +103,8 @@ The bridge picks a transcriber when it starts (`TRANSCRIBE=auto`), and its log s
 1. Copy `worker/wrangler.example.jsonc` to the folder above your webroot as `wrangler.jsonc`, and adjust the paths.
    - If you already have a Worker, import the handler instead:
      ```js
-     import { handleClaudeVoice, CLAUDE_VOICE_PATH } from './public/engine/worker/claude-voice-api.js';
-     // in fetch(): if (new URL(request.url).pathname === CLAUDE_VOICE_PATH) return handleClaudeVoice(request, env, ctx);
+     import { handleVoiceChat, VOICE_CHAT_PATH } from './public/engine/worker/voice-chat-api.js';
+     // in fetch(): if (new URL(request.url).pathname === VOICE_CHAT_PATH) return handleVoiceChat(request, env, ctx);
      ```
 2. Push the key from `.env`: `node public/engine/server/push-secrets.mjs`. This sets the `ANTHROPIC_API_KEY` secret and, if present, `ALLOWED_ORIGINS`.
 3. Deploy: `npx wrangler deploy`.
