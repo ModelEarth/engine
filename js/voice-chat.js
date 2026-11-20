@@ -51,7 +51,8 @@
  *   data-autostart    "false" to wait for a click even when the mic is already allowed
  * The ⚙ panel's Listening choices, remembered in this browser (voice-chat:listening): Hear Me While Claude Speaks (on
  * by default) keeps the mic on while Claude talks, leaving out Claude's own words as the mic hears them, so what you say
- * at the same time is kept and Claude listens until you stop; End of Your Turn, the pause that sends what you said
+ * at the same time is kept and Claude listens until you stop (not while speech to text goes through Whisper, which records
+ * whole turns: the setting is greyed out, with a note on why and on the Cloudflare quota); End of Your Turn, the pause that sends what you said
  * (0.8 s by default); and Mic Back After Claude, how long the mic waits after Claude speaks when it's off meanwhile.
  *   data-mic-level     "false" to skip the mic-level glow (if your device can't share the mic)
  *
@@ -1105,6 +1106,8 @@
         .check input { flex: none; width: 16px; height: 16px; margin: 1px 0 0; accent-color: #9cc2e8; cursor: pointer; }
         .check small { display: none; margin-top: 2px; font-size: 12px; line-height: 1.35; opacity: .7; }
         .text-out.open .check small, .listen.open .check small { display: block; }
+        .listen .check small.off-note:not([hidden]) { display: block; opacity: .85; } /* Why Hear Me While Claude Speaks is off, shown without Details */
+        .listen .check small.off-note[hidden], .listen .check small.off-why[hidden] { display: none; }
         .listen label:not(.check) > small { display: none; margin-top: -1px; font-size: 12px; line-height: 1.35; opacity: .7; }
         .listen.open label:not(.check) > small { display: block; }
         .check:has(input:disabled) { opacity: .45; cursor: default; }
@@ -1196,7 +1199,7 @@
           </div>
           <div class="listen" role="group" aria-labelledby="cv-listen">
             <div class="head"><span id="cv-listen">Listening</span><button class="details btn-sm" type="button" aria-expanded="false">Details</button></div>
-            <label class="check"><input type="checkbox" name="overlap"><span>Hear Me While Claude Speaks<small>The mic stays on while Claude talks. Claude's own words are left out of what it hears, so what you say at the same time is kept, and Claude listens until you stop.</small></span></label>
+            <label class="check"><input type="checkbox" name="overlap"><span>Hear Me While Claude Speaks<small>The mic stays on while Claude talks. Claude's own words are left out of what it hears, so what you say at the same time is kept, and Claude listens until you stop.</small><small class="off-note" hidden></small><small class="off-why" hidden></small></span></label>
             <label class="inline">End of Your Turn<select name="endPause"><option value="500">0.5 seconds</option><option value="800">0.8 seconds</option><option value="1000">1 second</option><option value="1500">1.5 seconds</option><option value="2500">2.5 seconds</option></select><small>How long a pause in your speaking sends what you said.</small></label>
             <label class="inline stt">Speech to Text<select name="stt"><option value="auto">Automatic</option><option value="browser">Browser</option><option value="bridge">Bridge</option></select><small>Automatic uses the browser's own speech input, and the bridge's where that's missing or isn't hearing you. The bridge records what you say and turns it into text on this computer (whisper.cpp) or with a cloud service.</small></label>
             <label class="inline mic-back">Mic Back After Claude<select name="micBack"><option value="250">0.25 seconds</option><option value="700">0.7 seconds</option><option value="1200">1.2 seconds</option></select><small>With Hear Me While Claude Speaks off, the mic is off while Claude talks and comes back this long after, once the echo has faded.</small></label>
@@ -1542,15 +1545,26 @@
       /** Text Output: { conversation, important, align, words, sets } as booleans. noWords: the page turned the floating words off (data-words). */
       /** Listening: { overlap, endPause, micBack }; noSR: no speech recognition here, so the section is hidden. */
       // stt: the bridge's speech to text ({ name, model, local }), or null where there's none. Without the browser's own
-      // speech input (noSR), only the Speech to Text and End of Your Turn lines apply.
-      setListening(o, noSR, stt) {
+      // speech input (noSR), only the Speech to Text and End of Your Turn lines apply. recording: speech goes through stt
+      // now (viaBridgeStt), recorded a turn at a time, so Hear Me While Claude Speaks can't apply and says why.
+      setListening(o, noSR, stt, recording) {
         listenBox.hidden = noSR && !stt;
         listenInputs.forEach((c) => { if (c.type === 'checkbox') c.checked = !!o[c.name]; else c.value = String(o[c.name]); });
         $('.stt').hidden = !stt;
         const sttSel = $('[name="stt"]');
         if (stt) sttSel.querySelector('[value="bridge"]').textContent = `Bridge (${stt.name})`;
         sttSel.querySelector('[value="browser"]').disabled = noSR;
-        $('[name="overlap"]').closest('label').hidden = noSR;
+        const off = !!(stt && (recording || noSR || o.stt === 'bridge')), overlap = $('[name="overlap"]'), offNote = $('.off-note'), offWhy = $('.off-why');
+        overlap.closest('label').hidden = noSR && !off;
+        overlap.disabled = off;
+        offNote.hidden = offWhy.hidden = !off;
+        if (off) {
+          const cloudflare = /cloudflare/i.test(stt.name);
+          offNote.textContent = `Not active while speech goes through ${stt.name}${cloudflare ? ' (with the team passphrase)' : ''}: the mic is off while ${shownName()} speaks.`;
+          offWhy.textContent = `${stt.name} takes a recording of each turn, and ${shownName()}'s own voice can't be taken out of a recording as it is from the browser's word-by-word speech input.`
+            + (cloudflare ? ` Listening over ${shownName()} would also send that voice to Whisper, on the site's Cloudflare Workers AI quota: 10,000 neurons a day free (about 3.5 hours of audio), then billed by Cloudflare on its paid plan. That's apart from the Claude API usage, which Anthropic bills.`
+              : stt.local ? '' : ` Listening over ${shownName()} would also send that voice to ${stt.name}, which bills for each minute of audio.`);
+        }
         $('.mic-back').hidden = !!o.overlap || noSR;
       },
       setTextOutput(o, noWords) {
@@ -2065,7 +2079,7 @@
     if (saved) Object.keys(listenOpt).forEach((k) => { if (typeof saved[k] === typeof listenOpt[k]) listenOpt[k] = saved[k]; });
   } catch (e) { /* storage blocked or unreadable */ }
   if (!['auto', 'browser', 'bridge'].includes(listenOpt.stt)) listenOpt.stt = 'auto';
-  const showListening = () => ui.setListening(listenOpt, !SR, transcriber);
+  const showListening = () => ui.setListening(listenOpt, !SR, transcriber, viaBridgeStt);
   showListening();
 
   wordField.setCovers(ui.boxes);
@@ -2304,7 +2318,7 @@
         viaBridgeStt = false;
         if (ok === 'denied') { setMode('error'); ui.note('Microphone access was blocked. Allow it in the address bar, then tap the button. You can also type.', 12000); ui.showInput(); }
         else { ui.note(`The microphone couldn’t be recorded here. You can type to ${shownName()} instead.`, 10000); ui.showInput(); }
-        showState(); emit('stt', { via: 'none' });
+        showListening(); showState(); emit('stt', { via: 'none' });
         return false;
       }
       if (note) ui.note(note, 9000);
@@ -2313,7 +2327,7 @@
       bridgeRec.stop(); viaBridgeStt = false;
       if (SR) startRecognition();
     }
-    showState(); emit('stt', { via: viaBridgeStt ? transcriber.name : 'browser' });
+    showListening(); showState(); emit('stt', { via: viaBridgeStt ? transcriber.name : 'browser' });
     return true;
   }
   // The browser's recognition failed: with Speech to Text on Automatic and the bridge able to, it listens instead.
