@@ -42,6 +42,7 @@ The same rule covers `wrangler dev`: on `localhost:8787` the page still uses the
 - `data-bridge-port`: bridge port. Default `3703`.
 - `data-lang`: speech language. Default: the page's `lang`, otherwise `en-US`.
 - `data-voice`: part of a voice name, for example `Samantha` or `Google UK English Female`.
+- `data-voice-mode`: `chosen`, `random` or `response` (see "Which voice speaks" below). Default: `chosen` when `data-voice` is set, otherwise `response`. The ⚙ panel's choice overrides both and is remembered in that browser.
 - `data-ui`: `full` (status pill and captions), `minimal` (pill only) or `none`.
 - `data-idle-timeout`: seconds of silence before a conversation closes itself. Default `120`.
 - `data-autostart="false"`: always wait for a click before starting.
@@ -139,6 +140,30 @@ The script strips the header before speaking, and the visuals change before the 
 **Energy.** `energy` (0–1) sets the tempo. Spoken words pulse the scene, and your mic level makes a glow while you talk.
 
 **Reduced motion.** `prefers-reduced-motion` slows everything down and removes the flashes.
+
+## Which voice speaks
+
+Replies are spoken with the browser's own text to speech (`speechSynthesis`). There's no SDK and no server voice. The voices are whatever that browser and OS have installed, so they differ from one browser to the next: Edge has Microsoft's online voices, such as "Microsoft Ava Online (Natural)", Chrome has "Google US English" and Safari has Apple's, such as "Samantha" or "Ava (Premium)". Your own speech has no effect on which voice is used.
+
+**Ranking.** Browsers don't rate their voices, so the widget ranks the English ones by name (`voiceTier` and `rankVoices` in `js/voice-chat.js`):
+
+| Tier | Voice name | Example |
+|---|---|---|
+| Best | contains "natural", "neural" or "premium" | Microsoft Ava Online (Natural) |
+| Very good | contains "enhanced", or starts with "Google " | Google UK English Female |
+| Standard | anything else | Samantha |
+| Robotic | old Mac voices such as Fred, Ralph, Albert and Grandma | Fred |
+| Novelty | Bubbles, Bells, Jester, Zarvox and the like | Zarvox |
+
+Within a tier, a favourites list (Ava, Andrew, Emma, Brian, Jenny and others) comes first, then US English, then UK English, then other English voices.
+
+**Voice modes.** The ⚙ panel's voice setting, or `data-voice-mode`, chooses from that ranked list:
+
+- **Chosen voice** (`chosen`): one voice you pick, which never changes.
+- **Random voice** (`random`): a different top-ranked voice for each new conversation.
+- **Change for response** (`response`, the default): a voice suited to each reply. Claude's hidden header for the reply also names a delivery style: `warm`, `bright`, `calm`, `authoritative`, `playful` or `storyteller` (`VOICE_STYLES` in `shared/voice-prompt.js`). The widget picks an installed voice that suits it (`VOICE_STYLES` in `js/voice-chat.js`). For example, `authoritative` prefers Andrew, Brian or Guy, and `playful` prefers Zoe, Aria or Allison. When none of those voices is installed, it uses the best-ranked voice it has, and it avoids repeating the voice just used.
+
+So the voice can change from one reply to the next, following the tone Claude chose for its answer.
 
 ## Browser notes
 
