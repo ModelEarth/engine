@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import vm from 'node:vm';
 
 // Exercise the widget's actual recognition handlers with a controllable speech service.
-const source = readFileSync(new URL('../claude-voice.js', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../js/voice-chat.js', import.meta.url), 'utf8');
 function section(start, end) {
   return source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
 }
@@ -16,7 +16,7 @@ function widget({ local = true, choice = 'auto', ready = true, mode = 'wake' } =
   const timers = [];
   const state = {
     mode, rec: null, wantListening: false, recRunning: false, listenPaused: false,
-    viaBridgeStt: false, srBroken: false, srHeard: false, srMisses: 0,
+    viaBridgeStt: false, srBroken: false, srMisses: 0,
     restartDelay: 250, networkErrors: 0, noSpeechWarned: false,
     transcriber: { name: 'test transcriber', local },
     listenOpt: { stt: choice }, cfg: { lang: 'en-US' }, isBrave: false,

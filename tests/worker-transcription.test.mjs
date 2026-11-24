@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { handleClaudeVoice } from '../worker/claude-voice-api.js';
+import { handleVoiceChat } from '../worker/voice-chat-api.js';
 
-const url = 'https://voice.example/api/claude-voice/transcribe?lang=en-US';
+const url = 'https://voice.example/api/voice-chat/transcribe?lang=en-US';
 const passphrase = 'test-passphrase-only';
 const audio = new Uint8Array(48);
 audio.set(new TextEncoder().encode('RIFF'), 0);
@@ -20,7 +20,7 @@ function binding() {
     } },
   };
 }
-const handle = (req, env) => handleClaudeVoice(req, env, {}, { passphrase: true });
+const handle = (req, env) => handleVoiceChat(req, env, {}, { passphrase: true });
 
 test('status advertises cloud transcription without starting inference', async () => {
   const env = binding();
