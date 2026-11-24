@@ -3,11 +3,12 @@
    the voice widget (engine/js/voice-chat.js) ask the question aloud and listen for the answer, and Claude replies
    warmly with a gentle follow-up. Without the voice widget, the browser just reads the question aloud. The left and
    right arrow keys move through the questions (arrowKeys).
-   Styles are in engine/css/engine.css. Used by project/goals (above its tabs) and project/care (centered).
+   Styles are in engine/css/talk-circle.css. Used by project/goals (above its tabs) and project/care (centered).
 
    Each folder has its own questions. Two ways to add the circle:
    - Declared: <div data-talk-circle="talk-circle.yaml"></div>, centered in that div, with the questions (and an
-     optional context for Claude) from the .yaml file beside the page:
+     optional context for Claude) from the .yaml file beside the page. Add data-talk-local to show it only on
+     localhost (engine/index.html). The page links css/talk-circle.css for its styles:
        context: "How Claude replies..."   (optional, else TALK_CONTEXT below)
        questions:
          - text: "What's a song you love?"
@@ -20,6 +21,7 @@
    next question ("What was your…"): Claude's follow-up question once the reply has it, else the next one in the
    list. A tap stops the reply and asks that question. Once the reply has been spoken, the circle comes back and
    shows the question in full. Large words the circle crosses fade to TALK_DIM, so its question stays readable.
+   When the conversation ends ("Thanks"), the question showing then stays, and the list moves on after TALK_MS.
 
    Before a conversation begins, a row of 2 to 10 voices from the widget (VoiceChat.voices()) shows below the circle as
    toggles: several can be on, and they take turns. Each greets you when it's turned on. Once a conversation begins
@@ -71,6 +73,7 @@
   let opts = {}, area = null, slot = null, zone = null;
   let questions = [], at = 0, timer = null, talking = false;
   let text = "", asked = "", small = false, spot = null, wordsField = null, dimFrame = 0;
+  let held = ""; // the question showing while the widget listens, kept when the conversation ends ("Thanks")
   let voicesRow = null, voicesDone = false; // the voice buttons, and whether a conversation has begun (they're gone)
 
   function el(tag, attrs = {}, ...children) {
@@ -79,7 +82,7 @@
     e.append(...children);
     return e;
   }
-  // While a conversation from the circle is on, html.talk-circle-talking hides what's marked .talk-circle-hide (engine.css).
+  // While a conversation from the circle is on, html.talk-circle-talking hides what's marked .talk-circle-hide (talk-circle.css).
   function setTalking(on) {
     talking = on;
     document.documentElement.classList.toggle("talk-circle-talking", on);
@@ -113,6 +116,7 @@
       showLinks(); // Not needed once the widget has loaded
       if (st !== "speaking") setSmall(false); // The reply has been spoken, or cut short
       if (!talking) return;
+      if (st === "listening") held = text;
       if (st === "off" || st === "error") { setTalking(false); setState(st === "error" ? "error" : "idle"); syncTimer(); }
       else if (HINTS[st]) setState(st);
       // Without voice input, the cursor goes in the widget's typing box for the answer.
@@ -130,11 +134,15 @@
     document.addEventListener("voice-chat:pause", () => { if (zone?.dataset.state === "listening") setState("listening"); }, true);
     document.addEventListener("voice-chat:voices", (e) => showVoices(e.detail?.choices), true);
     document.addEventListener("voice-chat:start", endVoices, true);
+    // The question showing when the conversation ended stays, in full, rather than the one the farewell's small circle
+    // offered. A fresh TALK_MS passes before the next one.
     document.addEventListener("voice-chat:end", () => {
       if (!talking) return;
       setTalking(false);
       setState("idle");
-      nextQuestion();
+      if (held) showText(held, true);
+      held = "";
+      if (timer) { clearInterval(timer); timer = null; }
       syncTimer();
     }, true);
     window.addEventListener("scroll", place, { passive: true });
@@ -426,10 +434,13 @@
   };
   window.TalkCircle = api;
 
-  // A div marked data-talk-circle="<file>.yaml" gets the circle, centered, with that file's questions.
+  // A div marked data-talk-circle="<file>.yaml" gets the circle, centered, with that file's questions. With
+  // data-talk-local too, only on localhost or with view=local in the URL, as localsite shows its .local elements.
+  const localView = () => location.host.includes("localhost") || [location.search, location.hash].some((p) => new URLSearchParams(p.slice(1)).get("view") === "local");
   function auto() {
     const host = document.querySelector("[data-talk-circle]");
     if (!host || zone) return;
+    if (host.hasAttribute("data-talk-local") && !localView()) { host.remove(); return; }
     init({ area: host });
     load(host.dataset.talkCircle || "talk-circle.yaml").catch((err) => console.warn("Talk circle:", err.message));
   }

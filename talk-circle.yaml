@@ -1,0 +1,24 @@
+# The talk circle on this page (index.html, data-talk-circle, js/talk-circle.js), over the Earth map, on
+# localhost only (data-talk-local). It shows these brief questions one at a time in large type. A tap has
+# the voice widget ask the shown question aloud and listen, and Claude replies as the context below asks.
+
+context: >-
+  I'm talking with you through the conversation circle on Model Earth's
+  Community Automation Engine page, over a live map of the Earth. It asks
+  brief questions about the environment, local industries and the place I
+  live, and it's asking me the question that follows. When I answer, reply
+  in two or three short sentences, linking what I said to the environment,
+  the local economy or the data this site explores where it fits. Then ask
+  one easy follow-up question about what I said.
+
+questions:
+  - text: "What's the weather like where you are?"
+  - text: "What's one thing your town makes or grows?"
+  - text: "Which place on Earth would you most like to see?"
+  - text: "What's a local business you love?"
+  - text: "How do you usually get around town?"
+  - text: "What would make your neighborhood greener?"
+  - text: "What's in season near you right now?"
+  - text: "Where does your electricity come from?"
+  - text: "Which wild animals live near you?"
+  - text: "What job in your area would you like to know more about?"
