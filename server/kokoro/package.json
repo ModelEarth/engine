@@ -1,0 +1,9 @@
+{
+  "name": "voice-chat-kokoro",
+  "private": true,
+  "description": "Kokoro text to speech for the voice widget's local bridge (server/local-bridge.mjs). Install with: npm install --prefix engine/server/kokoro",
+  "type": "module",
+  "dependencies": {
+    "kokoro-js": "1.2.1"
+  }
+}

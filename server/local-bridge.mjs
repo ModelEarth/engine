@@ -10,6 +10,8 @@
 // LOCAL_BACKEND=api answers through the Claude API with ANTHROPIC_API_KEY from .env.
 // POST .../transcribe turns speech into text for browsers whose own speech input is missing or fails (see TRANSCRIBE below).
 // POST .../focus brings the page's tab to the front of its browser, on a Mac (see FOCUS below).
+// GET .../voices and POST .../speak give the widget natural voices (see VOICES below): Kokoro on this computer once it's
+//   installed (npm install --prefix engine/server/kokoro), and Grok, ElevenLabs, OpenAI and Google with their keys.
 // No npm dependencies; needs Node 18+.
 
 import http from 'node:http';
@@ -20,6 +22,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_MODEL, pageFile, pagePath, sanitizeMessages, systemPrompt, transcriptPrompt } from '../shared/voice-prompt.js';
 import { streamClaude } from '../shared/anthropic.js';
+import { listVoices, speakText } from '../shared/tts/index.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -386,16 +389,29 @@ function listTabs() {
   return { now, tabs: [...tabs.values()], unreported: [...others.values()] };
 }
 
+// ---------- voices: text to speech for the widget ----------
+// GET .../voices lists the sources (shared/tts/index.js) and their voices; ?own=xai,elevenlabs names the /keys page
+// keys the visitor has, so sources needing one list their voices too. POST .../speak { source, voice, text, lang }
+// returns one sentence's audio, with word timings in x-voice-words when the source gives them. Kokoro runs here, from
+// server/kokoro/ (its own npm packages, so the bridge needs none): imported only once it's installed and asked for.
+const KOKORO_DIR = path.join(HERE, 'kokoro');
+// KOKORO=false leaves it out even when installed, so pages offer Kokoro in the browser instead (js/voice-kokoro.js).
+const kokoroInstalled = () => (process.env.KOKORO || '').toLowerCase() !== 'false' && existsSync(path.join(KOKORO_DIR, 'node_modules', 'kokoro-js'));
+let kokoroModule = null;
+const loadKokoro = () => (kokoroModule ||= import('./kokoro/kokoro.mjs').catch((err) => { kokoroModule = null; throw err; }));
+const TTS_EXTRA = { kokoro: { label: 'Kokoro', name: 'Kokoro (on this computer)', local: true, available: kokoroInstalled, load: loadKokoro } };
+const ttsEnv = process.env;
+
 const server = http.createServer(async (req, res) => {
   const origin = req.headers.origin;
   const url = new URL(req.url, 'http://x');
 
-  if (url.pathname === API_PATH || ['/health', '/status', '/transcribe', '/focus', '/presence', '/tabs', '/tabs/stop'].some((p) => url.pathname === API_PATH + p)) {
+  if (url.pathname === API_PATH || ['/health', '/status', '/transcribe', '/focus', '/presence', '/tabs', '/tabs/stop', '/voices', '/speak'].some((p) => url.pathname === API_PATH + p)) {
     if (!originAllowed(origin)) { res.writeHead(403); return res.end('Origin not allowed'); }
     const cors = origin ? { 'access-control-allow-origin': origin, vary: 'Origin' } : {};
     const reply = (code, obj) => { res.writeHead(code, { ...cors, 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(obj)); };
     if (req.method === 'OPTIONS') {
-      res.writeHead(204, { ...cors, 'access-control-allow-methods': 'POST, GET, OPTIONS', 'access-control-allow-headers': 'content-type, x-team-passphrase', 'access-control-max-age': '600' });
+      res.writeHead(204, { ...cors, 'access-control-allow-methods': 'POST, GET, OPTIONS', 'access-control-allow-headers': 'content-type, x-team-passphrase, x-provider-name, x-provider-key', 'access-control-expose-headers': 'x-voice-words, x-voice-source', 'access-control-max-age': '600' });
       return res.end();
     }
     if (url.pathname.endsWith('/health')) {
@@ -403,6 +419,32 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify({ ok: true, backend: BACKEND, model: MODEL }));
     }
     if (url.pathname.endsWith('/tabs') && req.method === 'GET') return reply(200, listTabs());
+    if (url.pathname.endsWith('/voices') && req.method === 'GET') {
+      const ownNames = (url.searchParams.get('own') || '').split(',').map((s) => s.trim()).filter(Boolean);
+      // A page asking is likely to speak soon, so Kokoro's model starts loading now (about 12 seconds the first time).
+      if (kokoroInstalled() && url.searchParams.get('warm') === 'kokoro') loadKokoro().then((m) => m.warm()).catch((err) => log(`kokoro: ${err.message}`));
+      return reply(200, { sources: await listVoices(ttsEnv, { extra: TTS_EXTRA, ownNames }), defaultSource: kokoroInstalled() ? 'kokoro' : 'browser',
+        ...(!kokoroInstalled() && { install: 'npm install --prefix engine/server/kokoro' }) });
+    }
+    if (url.pathname.endsWith('/speak') && req.method === 'POST') {
+      let b;
+      try { b = JSON.parse(await readBody(req, 8000)); } catch { b = null; }
+      if (!b || typeof b.source !== 'string' || typeof b.text !== 'string') return reply(400, { error: 'Bad request' });
+      const own = { name: String(req.headers['x-provider-name'] || '').trim(), key: String(req.headers['x-provider-key'] || '').trim() };
+      const ac = new AbortController();
+      res.on('close', () => { if (!res.writableEnded) ac.abort(); });
+      const started = Date.now();
+      try {
+        const out = await speakText(ttsEnv, { source: b.source, voice: String(b.voice || ''), text: b.text, lang: String(b.lang || ''), own: own.key ? own : null, signal: ac.signal, extra: TTS_EXTRA });
+        if (b.source === 'kokoro' && Date.now() - started > 5000) log(`kokoro: ${Date.now() - started} ms (the first sentence loads the model)`);
+        res.writeHead(200, { ...cors, 'content-type': out.type, 'content-length': out.audio.length, 'cache-control': 'no-store', 'x-voice-source': b.source, 'access-control-expose-headers': 'x-voice-words, x-voice-source',
+          ...(out.words && { 'x-voice-words': JSON.stringify(out.words) }) });
+        return res.end(Buffer.from(out.audio.buffer, out.audio.byteOffset, out.audio.length));
+      } catch (err) {
+        if (!ac.signal.aborted) log(`speak (${b.source}): ${err.message}`);
+        return reply(err.status || 502, { error: err.message, ...(err.needsKey && { needsKey: true }) });
+      }
+    }
     if (url.pathname.endsWith('/presence') && req.method === 'POST') {
       let b;
       try { b = JSON.parse(await readBody(req, 8000)); } catch { b = null; }
@@ -465,8 +507,8 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    let messages, output, page, tab;
-    try { ({ messages, output, page, tab } = JSON.parse(await readBody(req))); messages = sanitizeMessages(messages); } catch { messages = null; }
+    let messages, output, page, tab, voice;
+    try { ({ messages, output, page, tab, voice } = JSON.parse(await readBody(req))); messages = sanitizeMessages(messages); } catch { messages = null; }
     if (!messages) { res.writeHead(400, { ...cors, 'content-type': 'application/json' }); return res.end('{"error":"Bad request"}'); }
     noteRequest(req, 'question', typeof page === 'string' ? page.slice(0, 300) : '', tab);
 
@@ -486,7 +528,7 @@ const server = http.createServer(async (req, res) => {
       if (info.thinking) send({ t: 'thinking', v: info.thinking });
     };
     try {
-      await (BACKEND === 'api' ? askApi : askCli)(messages, systemPrompt(output, page), (text) => send({ t: 'text', v: text }), ac.signal, output, onInfo, page);
+      await (BACKEND === 'api' ? askApi : askCli)(messages, systemPrompt(output, page, voice), (text) => send({ t: 'text', v: text }), ac.signal, output, onInfo, page);
       if (ac.signal.aborted) outcome = 'stopped';
       send({ t: 'done' });
       log(`${outcome === 'stopped' ? 'stopped' : 'answered'} via ${BACKEND} in ${Date.now() - started} ms`);
@@ -526,6 +568,8 @@ server.listen(PORT, HOST, () => {
   if (BACKEND === 'cli') log(`CLI: ${CLI} (run "claude" once and log in if you have not)`);
   if (BACKEND === 'cli') log(READ_FILES ? `CLI files: reads ${WEBROOT}, read-only (CLI_READ_FILES=false to turn off)` : 'CLI files: none');
   log(FOCUS ? `focus: brings the talking tab to the front (${API_PATH}/focus; FOCUS=false to turn off)` : 'focus: off');
+  log(kokoroInstalled() ? `voices: Kokoro on this computer (${API_PATH}/voices and /speak; the model loads with the first sentence)`
+    : 'voices: Kokoro isn\'t installed, so pages use browser voices by default (npm install --prefix engine/server/kokoro)');
   TRANSCRIBER = pickTranscriber();
   log(TRANSCRIBER ? `speech to text: ${TRANSCRIBER.name} (${TRANSCRIBER.model}) at ${API_PATH}/transcribe`
     : 'speech to text: none, so browsers without their own speech input type instead (see TRANSCRIBE in this file)');

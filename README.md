@@ -9,9 +9,14 @@ Talk to Claude Opus 5.5 by voice from a static page.
 ```
 engine/                        ← this submodule, inside your webroot
   js/voice-chat.js             ← the only file the page loads
+  js/voice-audio.js            ← plays the natural voices (imported only when one speaks)
+  js/voice-kokoro.js           ← Kokoro in the browser (imported only when it's chosen)
+  js/talk-circle.js            ← the Talk Circle, with its voice buttons
   demo.html
   shared/                      ← system prompt + Claude API streaming (used by both servers)
+  shared/tts/                  ← the voice services, one module each (see "Voices")
   server/local-bridge.mjs      ← localhost: Claude Code CLI (or API) bridge
+  server/kokoro/               ← Kokoro for the bridge, with its own npm packages
   server/push-secrets.mjs      ← copies keys from .env to Cloudflare secrets
   worker/voice-chat-api.js     ← Cloudflare Worker endpoint
   worker/wrangler.example.jsonc
@@ -41,8 +46,8 @@ The same rule covers `wrangler dev`: on `localhost:8787` the page still uses the
 - `data-endpoint`: explicit API URL.
 - `data-bridge-port`: bridge port. Default `3703`.
 - `data-lang`: speech language. Default: the page's `lang`, otherwise `en-US`.
-- `data-voice`: part of a voice name, for example `Samantha` or `Google UK English Female`.
-- `data-voice-mode`: `chosen`, `random` or `response` (see "Which voice speaks" below). Default: `chosen` when `data-voice` is set, otherwise `response`. The ⚙ panel's choice overrides both and is remembered in that browser.
+- `data-voice`: a voice to start with, by name, from any source: for example `Heart` (Kokoro), `Samantha` or `Google UK English Female`.
+- `data-voice-mode`: when several voices take turns, `response` (each reply, by its mood; the default) or `random` (each conversation). See "Voices" below. The ⚙ panel's choices override both and are remembered in that browser.
 - `data-ui`: `full` (status pill and captions), `minimal` (pill only) or `none`.
 - `data-idle-timeout`: seconds of silence before a conversation closes itself. Default `120`.
 - `data-autostart="false"`: always wait for a click before starting.
@@ -141,11 +146,57 @@ The script strips the header before speaking, and the visuals change before the 
 
 **Reduced motion.** `prefers-reduced-motion` slows everything down and removes the flashes.
 
-## Which voice speaks
+## Voices
 
-Replies are spoken with the browser's own text to speech (`speechSynthesis`). There's no SDK and no server voice. The voices are whatever that browser and OS have installed, so they differ from one browser to the next: Edge has Microsoft's online voices, such as "Microsoft Ava Online (Natural)", Chrome has "Google US English" and Safari has Apple's, such as "Samantha" or "Ava (Premium)". Your own speech has no effect on which voice is used.
+Replies can be spoken by natural voices from several services, or by the browser's own voices (`speechSynthesis`). The services are listed by the bridge or the Worker at `GET /api/voice-chat/voices`, and `POST /api/voice-chat/speak` turns one sentence at a time into audio. Each service is its own small module in `shared/tts/`, loaded only when it's used. In the page, `js/voice-audio.js` plays their audio, and it's imported only once one of them speaks, so a page that uses browser voices loads nothing more.
 
-**Ranking.** Browsers don't rate their voices, so the widget ranks the English ones by name (`voiceTier` and `rankVoices` in `js/voice-chat.js`):
+| Source | Where it runs | Key | Cost (check before relying on these) |
+| --- | --- | --- | --- |
+| Kokoro (Kokoro-82M, open source) | The local bridge, on this computer | None | Free, offline |
+| Kokoro in the browser | The visitor's browser, on any site | None | Free, after a one-time download the visitor agrees to |
+| Deepgram Aura-2 | The Cloudflare Worker, through the AI binding | None | $0.030 per 1,000 characters, within Workers AI's 10,000 free Neurons a day |
+| Grok (xAI) | Bridge or Worker | `XAI_API_KEY`, or the visitor's own xAI key | $15 per million characters |
+| ElevenLabs (Flash v2.5) | Bridge or Worker | `ELEVENLABS_API_KEY`, or the visitor's own | 10,000 free credits a month (non-commercial, with attribution), then paid plans |
+| OpenAI (`gpt-4o-mini-tts`) | Bridge or Worker | `OPENAI_API_KEY`, or the visitor's own | Low, per minute of audio |
+| Google Cloud (Chirp 3 HD) | Bridge or Worker | `GOOGLE_TTS_API_KEY`, or the visitor's own | A free monthly allowance, then per character |
+| The browser's own voices | The browser | None | Free |
+
+Anthropic has no text-to-speech service, so Claude's own voice isn't among them.
+
+**Defaults.** Until voices are chosen, the default source's first voice speaks: Kokoro's Heart on localhost, once Kokoro is installed on the bridge, and Aura's Thalia on the deployed site. Without either, the browser's voices speak, as below. `data-voice` names a voice to start with instead, from any source.
+
+**Installing Kokoro on the bridge.** Kokoro has its own npm packages, kept apart from the bridge in `server/kokoro/`:
+
+```bash
+npm install --prefix engine/server/kokoro
+```
+
+Then restart the bridge. Its model (about 90 MB) downloads from Hugging Face with the first sentence and stays cached. A page asking for the voices starts loading it, which takes about 12 seconds on an M-series Mac. After that, a sentence takes 1 to 2 seconds, faster than it plays. `KOKORO=false` leaves it out even when installed, and `KOKORO_DTYPE` picks the model's precision (`q8` by default). Kokoro speaks American and British English.
+
+**Kokoro in the browser.** Where the bridge doesn't have Kokoro, as on the deployed site, it can run in the visitor's own browser (`js/voice-kokoro.js`, with kokoro-js from jsDelivr). Nothing downloads until the visitor agrees in a dialog that gives the size:
+- With WebGPU (Chrome, Edge, Brave, recent Safari), it's the fp16 model, about 185 MB in all. A 5-second sentence takes about 0.3 seconds.
+- Without WebGPU, it's the q8 model on WebAssembly, about 115 MB. That takes about twice a sentence's length, so the speech pauses between sentences.
+
+The files are kept in the browser's storage for the site, so restarting the browser doesn't download them again. They download again only if the site's data is cleared, in a private window, or if the browser removes them to free space. Safari can also remove a site's files after several weeks without a visit. If they're gone, the dialog asks again before downloading. The ⚙ panel has **Remove Kokoro files**.
+
+**Keys.** Keyed sources use the server's key from the env file (pushed to the Worker with `node engine/server/push-secrets.mjs --voices`), or the visitor's own key from the Keys page: an xAI key for Grok, an OpenAI key for OpenAI, and ElevenLabs and Google Cloud Text-to-Speech keys. A source with neither is listed in the ⚙ panel under **With a key**. On the deployed site, a source using the site's key or the AI binding needs the team passphrase, as a conversation does. The Worker keeps each sentence's audio in the Cache API, so a greeting or a repeated reply costs nothing the second time.
+
+**Choosing voices.** Below a Talk Circle (`js/talk-circle.js`), 2 to 10 voices show as buttons before a conversation begins: the default source's best, a couple from each other source and the browser's best. Once the conversation begins, the buttons go, and the ⚙ panel's **Voices** list has every voice, grouped by source, plus **More Browser Voices**. Both change the same choice, which is remembered in the browser (`voice-chat:pool` in localStorage):
+- Turning a voice on has it greet you by name, as usual for its language and region: "Hi, I'm Heart." (US English), "Hello, I'm George." (UK), "G'day, I'm Theia." (Australia), "¡Hola, soy Celeste!" (Spanish).
+- With one voice on, it speaks every reply.
+- With several on, they take turns, and Claude picks the voice for each reply. Each question tells Claude which voices are on, with their accents and styles, and Claude's hidden header for the reply names one as `speaker`. Claude prefers a voice whose accent belongs to the place the question is about, such as a British English voice for a question about England. Otherwise it picks by the reply's delivery style: `warm`, `bright`, `calm`, `authoritative`, `playful` or `storyteller` (`VOICE_STYLES` in `shared/voice-prompt.js`). When the header names no voice that's on, the style picks one, never the one just used. Only voices that are on are used: with only an American voice on, a question about England is still answered in it. **Take Turns** can change voice for each conversation instead (`data-voice-mode="random"`).
+- Claude knows which voice it's speaking with (`voiceRules` in `shared/voice-prompt.js`), so "Which voice is this?" gets the voice's name and source.
+- With none on, the browser's best voices take turns in the same way.
+
+A page can do the same from its own script: `VoiceChat.voices()` lists the voices for buttons, `VoiceChat.setVoicePool(ids)` and `VoiceChat.toggleVoice(id)` choose them, and the `voice-chat:voices` event says when they change.
+
+**When a voice can't speak.** If a service fails (no key, out of credits, offline) or hasn't started a sentence within 9 seconds, the best browser voice says that sentence. A note says why, once. After a refusal or a second failure, that service waits until it's chosen again.
+
+### The browser's own voices
+
+The browser's voices are whatever that browser and OS have installed, so they differ from one browser to the next: Edge has Microsoft's online voices, such as "Microsoft Ava Online (Natural)", Chrome has "Google US English" and Safari has Apple's, such as "Samantha" or "Ava (Premium)". On a Mac, the Premium and Enhanced voices are added in System Settings > Accessibility > Spoken Content > System Voice > Manage Voices.
+
+Browsers don't rate their voices, so the widget ranks the English ones by name (`voiceTier` and `rankVoices` in `js/voice-chat.js`):
 
 | Tier | Voice name | Example |
 |---|---|---|
@@ -155,15 +206,7 @@ Replies are spoken with the browser's own text to speech (`speechSynthesis`). Th
 | Robotic | old Mac voices such as Fred, Ralph, Albert and Grandma | Fred |
 | Novelty | Bubbles, Bells, Jester, Zarvox and the like | Zarvox |
 
-Within a tier, a favourites list (Ava, Andrew, Emma, Brian, Jenny and others) comes first, then US English, then UK English, then other English voices.
-
-**Voice modes.** The ⚙ panel's voice setting, or `data-voice-mode`, chooses from that ranked list:
-
-- **Chosen voice** (`chosen`): one voice you pick, which never changes.
-- **Random voice** (`random`): a different top-ranked voice for each new conversation.
-- **Change for response** (`response`, the default): a voice suited to each reply. Claude's hidden header for the reply also names a delivery style: `warm`, `bright`, `calm`, `authoritative`, `playful` or `storyteller` (`VOICE_STYLES` in `shared/voice-prompt.js`). The widget picks an installed voice that suits it (`VOICE_STYLES` in `js/voice-chat.js`). For example, `authoritative` prefers Andrew, Brian or Guy, and `playful` prefers Zoe, Aria or Allison. When none of those voices is installed, it uses the best-ranked voice it has, and it avoids repeating the voice just used.
-
-So the voice can change from one reply to the next, following the tone Claude chose for its answer.
+Within a tier, a favourites list (Ava, Andrew, Emma, Brian, Jenny and others) comes first, then US English, then UK English, then other English voices. The Best and Very good ones are offered as buttons. With no voices chosen, a reply's style picks an installed voice that suits it (`VOICE_STYLES` in `js/voice-chat.js`): for example, `authoritative` prefers Andrew, Brian or Guy, and `playful` prefers Zoe, Aria or Allison.
 
 ## Browser notes
 

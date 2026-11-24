@@ -22,6 +22,11 @@
 //                      each spoken turn (a 16 kHz WAV) into text with Whisper (TRANSCRIBE_MODEL), as the local bridge does
 //                      with whisper.cpp. Bind it in wrangler: [ai] binding = "AI" (wrangler.toml) or "ai": { "binding": "AI" }.
 //                      Like a conversation, it needs the team passphrase when one is set, or the visitor's own key.
+//   Voices             .../voices and .../speak give the widget natural voices (shared/tts/index.js): Deepgram Aura-2
+//                      through the AI binding (the default here), and Grok, ElevenLabs, OpenAI and Google Cloud with
+//                      XAI_API_KEY, ELEVENLABS_API_KEY, OPENAI_API_KEY and GOOGLE_TTS_API_KEY (secrets, optional), or
+//                      the visitor's own key for that source. Each sentence's audio is kept in the Cache API, so a
+//                      greeting or a repeated question costs nothing the second time.
 //   TEAM_PASSPHRASE    (secret, optional): when set, each request needs it (shared/passphrase.js). voice-chat.js
 //                      asks for it on a 401 and trades it at /api/team-passphrase for a cookie page scripts can't
 //                      read (handleTeamPassphrase there), so only people given it use the key.
@@ -38,6 +43,7 @@ import { streamClaude } from '../shared/anthropic.js';
 import { GEMINI_DEFAULT_MODEL, streamGemini } from '../shared/gemini.js';
 import { streamOpenAICompat } from '../shared/openai-compat.js';
 import { PASSPHRASE_HEADER, passphraseRefusal } from '../shared/passphrase.js';
+import { listVoices, speakText, SOURCES as TTS_SOURCES } from '../shared/tts/index.js';
 
 export const VOICE_CHAT_PATH = '/api/voice-chat';
 // The conversation at VOICE_CHAT_PATH, plus .../status and .../transcribe under it
@@ -104,16 +110,69 @@ async function voiceTranscribe(request, env, cors, required) {
   }
 }
 
+// .../voices: the sources this Worker can speak with, and their voices. ?own=xai,elevenlabs names the /keys page keys
+// the visitor has, so sources needing one list their voices too.
+async function voiceList(request, env, cors) {
+  const ownNames = (new URL(request.url).searchParams.get('own') || '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 10);
+  const sources = await listVoices(env, { ownNames });
+  return Response.json({ sources, defaultSource: env.AI ? 'aura' : 'browser' }, { headers: { ...cors, 'cache-control': 'no-store' } });
+}
+
+// .../speak { source, voice, text, lang }: one sentence as audio, with word timings in x-voice-words when the source
+// gives them. A source using the site's own key or binding needs the team passphrase when one is set, as a
+// conversation does. A keyed source takes the visitor's own key for it instead (an xAI key for Grok, say). Unlike
+// .../transcribe, another of their keys doesn't open Aura, since an unchecked key header would spend the site's.
+const SPEAK_CACHE_DAYS = 30;
+async function voiceSpeak(request, env, ctx, cors, required) {
+  let b = null;
+  try { const t = await request.text(); if (t.length <= 8000) b = JSON.parse(t); } catch { b = null; }
+  if (!b || typeof b.source !== 'string' || typeof b.text !== 'string' || !TTS_SOURCES[b.source]) return Response.json({ error: 'Bad request' }, { status: 400, headers: cors });
+  const src = TTS_SOURCES[b.source];
+  const ownName = String(request.headers.get('x-provider-name') || '').trim();
+  const ownKey = String(request.headers.get('x-provider-key') || '').trim();
+  const ownForSource = !!ownKey && !!src.own && ownName === src.own;
+  if (!ownForSource) {
+    const refusal = await passphraseRefusal(request, env, { required, to: 'use this voice' });
+    if (refusal) return Response.json({ error: refusal.error, passphrase: refusal.passphrase }, { status: refusal.status, headers: cors });
+  }
+  if (env.VOICE_CHAT_LIMITER) {
+    const { success } = await env.VOICE_CHAT_LIMITER.limit({ key: request.headers.get('cf-connecting-ip') || 'anon' });
+    if (!success) return Response.json({ error: 'Too many requests' }, { status: 429, headers: cors });
+  }
+  const text = b.text.replace(/\s+/g, ' ').trim(), voice = String(b.voice || ''), lang = String(b.lang || '');
+  const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${voice}|${lang}|${text}`)))].map((x) => x.toString(16).padStart(2, '0')).join('');
+  const cacheKey = new Request(`https://voice-chat.cache/${b.source}/${encodeURIComponent(voice)}/${hash}`);
+  const cache = typeof caches !== 'undefined' ? caches.default : null;
+  const hit = cache && await cache.match(cacheKey).catch(() => null);
+  if (hit) {
+    const h = new Headers(hit.headers);
+    for (const [k, v] of Object.entries(cors)) h.set(k, v);
+    h.set('x-voice-cache', 'hit');
+    h.set('access-control-expose-headers', 'x-voice-words, x-voice-source');
+    return new Response(hit.body, { headers: h });
+  }
+  try {
+    const out = await speakText(env, { source: b.source, voice, text, lang, own: ownForSource ? { name: ownName, key: ownKey } : null, signal: request.signal });
+    const headers = { 'content-type': out.type, 'x-voice-source': b.source, ...(out.words && { 'x-voice-words': JSON.stringify(out.words) }) };
+    if (cache) ctx?.waitUntil?.(cache.put(cacheKey, new Response(out.audio.slice(), { headers: { ...headers, 'cache-control': `public, max-age=${SPEAK_CACHE_DAYS * 86400}` } })).catch(() => {}));
+    return new Response(out.audio, { headers: { ...cors, ...headers, 'access-control-expose-headers': 'x-voice-words, x-voice-source', 'cache-control': 'no-store' } });
+  } catch (err) {
+    return Response.json({ error: err.message || 'That voice couldn’t speak.', ...(err.needsKey && { needsKey: true }) }, { status: err.status || 502, headers: cors });
+  }
+}
+
 export async function handleVoiceChat(request, env, ctx, { passphrase: required = false, tools = null } = {}) {
   const { ok, headers: cors } = corsHeaders(request, env);
   if (!ok) return new Response('Origin not allowed', { status: 403 });
   const path = new URL(request.url).pathname;
   if (path === VOICE_CHAT_PATH + '/status' && request.method === 'GET') return voiceStatus(env, cors);
   if (path === VOICE_CHAT_PATH + '/transcribe' && request.method === 'POST') return voiceTranscribe(request, env, cors, required);
+  if (path === VOICE_CHAT_PATH + '/voices' && request.method === 'GET') return voiceList(request, env, cors);
+  if (path === VOICE_CHAT_PATH + '/speak' && request.method === 'POST') return voiceSpeak(request, env, ctx, cors, required);
   if (path !== VOICE_CHAT_PATH && request.method !== 'OPTIONS') return Response.json({ error: 'Not found' }, { status: 404, headers: cors });
 
   if (request.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: { ...cors, 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-headers': `content-type, ${PASSPHRASE_HEADER}, x-provider-name, x-provider-key`, 'access-control-max-age': '600' } });
+    return new Response(null, { status: 204, headers: { ...cors, 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-headers': `content-type, ${PASSPHRASE_HEADER}, x-provider-name, x-provider-key`, 'access-control-expose-headers': 'x-voice-words, x-voice-source', 'access-control-max-age': '600' } });
   }
   if (request.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: cors });
 
@@ -135,10 +194,10 @@ export async function handleVoiceChat(request, env, ctx, { passphrase: required 
     if (!success) return Response.json({ error: 'Too many requests' }, { status: 429, headers: cors });
   }
 
-  let messages = null, output = null, page = null;
+  let messages = null, output = null, page = null, voice = null;
   try {
     const body = await request.text();
-    if (body.length <= 200_000) ({ messages, output, page } = JSON.parse(body));
+    if (body.length <= 200_000) ({ messages, output, page, voice } = JSON.parse(body));
     messages = sanitizeMessages(messages);
   } catch { messages = null; }
   if (!messages) return Response.json({ error: 'Bad request' }, { status: 400, headers: cors });
@@ -149,7 +208,7 @@ export async function handleVoiceChat(request, env, ctx, { passphrase: required 
   const send = (obj) => writer.write(enc.encode(JSON.stringify(obj) + '\n')).catch(() => {});
 
   // Claude first, then Gemini. A provider that fails before saying anything hands over to the next one.
-  const system = systemPrompt(output, page);
+  const system = systemPrompt(output, page, voice);
   const gemini = (apiKey) => ({ name: 'Gemini', model: env.GEMINI_MODEL || GEMINI_DEFAULT_MODEL,
     stream: (o) => streamGemini({ ...o, apiKey, model: env.GEMINI_MODEL || GEMINI_DEFAULT_MODEL, system: standingIn(system, 'Gemini') }) });
   const openaiStyle = (p, apiKey) => ({ name: p.name, model: p.model,

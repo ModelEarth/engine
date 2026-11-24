@@ -485,13 +485,10 @@
   }
 
   // ------------------------------------------------------------------ voices
-  // chosen = always the picked voice; random = a new top voice each conversation; response = a new voice each reply, suited to it.
+  // When several voices are on (or none, leaving it to the browser's best), they take turns: response = a new one each
+  // reply, suited to its mood; random = a new one each conversation. "chosen" is from earlier versions, which had one
+  // chosen voice: it becomes a pool of that voice (voicePool) and response.
   const VOICE_MODES = ['chosen', 'random', 'response'];
-  const VOICE_HINTS = {
-    chosen: 'Always speaks with the voice you pick.',
-    random: 'A new top-rated voice for each conversation.',
-    response: 'A different voice for each reply, suited to the question.',
-  };
   // Voices that suit each style Claude names in its mood header. Keep the keys in step with VOICE_STYLES in shared/voice-prompt.js.
   const VOICE_STYLES = {
     warm: ['Ava', 'Emma', 'Samantha', 'Jenny', 'Moira', 'Susan', 'Karen', 'Andrew'],
@@ -532,6 +529,17 @@
   function voiceLabel(v) {
     const r = (v.lang.split(/[-_]/)[1] || '').toUpperCase();
     return `${shortVoiceName(v)} · ${EN_REGIONS[r] || r || 'English'}`;
+  }
+  // A voice's greeting when it's turned on, as usual for its language and region ("Hi, I’m Heart."), English by default.
+  const GREETINGS = {
+    'en-US': 'Hi, I’m {n}.', 'en-CA': 'Hi, I’m {n}.', 'en-GB': 'Hello, I’m {n}.', 'en-IE': 'Hiya, I’m {n}.', 'en-SC': 'Hiya, I’m {n}.',
+    'en-AU': 'G’day, I’m {n}.', 'en-NZ': 'Kia ora, I’m {n}.', 'en-IN': 'Namaste, I’m {n}.', 'en-ZA': 'Howzit, I’m {n}.', en: 'Hello, I’m {n}.',
+    es: '¡Hola, soy {n}!', fr: 'Bonjour, je suis {n}.', de: 'Hallo, ich bin {n}.', it: 'Ciao, sono {n}.', pt: 'Olá, eu sou {n}.',
+    ja: 'こんにちは、{n}です。', hi: 'नमस्ते, मैं {n} हूँ।', zh: '你好，我是{n}。',
+  };
+  function greetingFor(v) {
+    const [base, region] = String(v.lang || 'en-US').split(/[-_]/);
+    return (GREETINGS[`${(base || '').toLowerCase()}-${(region || '').toUpperCase()}`] || GREETINGS[(base || '').toLowerCase()] || GREETINGS.en).replace('{n}', v.name);
   }
 
   // ------------------------------------------------------------------ spoken keywords
@@ -997,7 +1005,7 @@
 
   // ------------------------------------------------------------------ UI (shadow DOM so page CSS never collides)
   function UI(host, actions) {
-    if (cfg.ui === 'none') return { setState() {}, user() {}, claude() {}, extras() {}, important() {}, note() {}, fade() {}, showInput() {}, askPassphrase() {}, setVoices() {}, setVoiceMode() {}, setVoiceInfo() {}, setTextOutput() {}, setListening() {}, setTabs() {}, setPaused() {}, setAgent() {}, addInput() {}, hideText() {}, rename() {}, boxes: () => [], play: null };
+    if (cfg.ui === 'none') return { setState() {}, user() {}, claude() {}, extras() {}, important() {}, note() {}, fade() {}, showInput() {}, askPassphrase() {}, setVoices() {}, setVoiceMode() {}, setVoiceInfo() {}, setVoiceGroups() {}, setTextOutput() {}, setListening() {}, setTabs() {}, setPaused() {}, setAgent() {}, addInput() {}, hideText() {}, rename() {}, boxes: () => [], play: null };
     let play = ds.playButton ? document.querySelector(ds.playButton) : null;
     const el = document.createElement('div');
     el.className = 'voice-chat-ui';
@@ -1091,6 +1099,19 @@
         .panel label { display: flex; flex-direction: column; gap: 5px; }
         .panel [hidden] { display: none; }
         .hint { font-size: 12px; line-height: 1.4; opacity: .75; }
+        /* Voices: toggles grouped by source (setVoiceGroups), the same pool as the buttons below a Talk Circle. */
+        .voices { display: flex; flex-direction: column; gap: 9px; }
+        .voices .head { font-weight: 600; }
+        .vgroups { display: flex; flex-direction: column; gap: 9px; }
+        .vg { display: flex; flex-direction: column; gap: 5px; }
+        .vg-head { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; }
+        .vg-head small { font-size: 11.5px; opacity: .7; }
+        .vg > small { font-size: 11.5px; line-height: 1.35; opacity: .75; }
+        .vbtns { display: flex; flex-wrap: wrap; gap: 5px; }
+        .panel .vbtn { padding: 3px 10px; font-size: 12px; line-height: 1.4; backdrop-filter: none; -webkit-backdrop-filter: none; border-color: rgba(255,255,255,.28); background: none; }
+        .panel .vbtn:hover { background: rgba(255,255,255,.12); }
+        .panel .vbtn[aria-pressed="true"] { background: #f4f6fb; color: #121622; border-color: #f4f6fb; }
+        .panel .vbtn.failed { text-decoration: line-through; opacity: .6; }
         .text-out, .agent, .listen, .tabs { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.14); }
         .text-out .head, .agent .head, .listen .head, .tabs .head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
         /* "Details" shows each choice's description under its one-line label. .btn-sm as in localsite's base.css, which can't reach in here. */
@@ -1129,7 +1150,7 @@
            (Details) wraps to the line below. No display here, so .panel [hidden] still hides the Mic Back line. */
         .panel label.inline { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; column-gap: 10px; }
         .panel label.inline > small { flex-basis: 100%; }
-        select.vmode, .listen select { width: auto; max-width: 100%; height: auto; margin-left: auto; padding: 2px 24px 2px 10px; font-size: 12px; line-height: 1.5;
+        select.vmode, select.voice, .listen select { width: auto; max-width: 100%; height: auto; margin-left: auto; padding: 2px 24px 2px 10px; font-size: 12px; line-height: 1.5;
                                        background-position: right 9px center; }
         select:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
         option, optgroup { color: #111; background: #fff; }
@@ -1189,15 +1210,18 @@
         <div class="cap claude"><button type="button" class="bulb" aria-expanded="false" title="Show the reply's extras" aria-label="Show the reply's extras" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.8 10.6c.6.5.8 1.2.8 1.9V16h6v-.5c0-.7.2-1.4.8-1.9A6 6 0 0 0 12 3z"/></svg></button><div class="extras" hidden></div><span class="claude-text" aria-live="polite"></span></div>
         <div class="cap notice" role="status"></div>
         <div class="panel" id="cv-settings" role="group" aria-label="Voice settings">
-          <label class="inline">Voice
-            <select class="vmode">
-              <option value="chosen">Chosen voice</option>
-              <option value="random">Random voice</option>
-              <option value="response">Change for response</option>
-            </select>
-          </label>
-          <label class="pick">Chosen voice<select class="voice"></select></label>
-          <div class="hint"></div>
+          <div class="voices" role="group" aria-labelledby="cv-voices">
+            <div class="head"><span id="cv-voices">Voices</span></div>
+            <div class="vgroups"></div>
+            <label class="inline turns">Take Turns
+              <select class="vmode">
+                <option value="response">Each reply, by mood</option>
+                <option value="random">Each conversation</option>
+              </select>
+            </label>
+            <label class="pick">More Browser Voices<select class="voice"></select></label>
+            <div class="hint"></div>
+          </div>
           <div class="text-out" role="group" aria-labelledby="cv-text-out">
             <div class="head"><span id="cv-text-out">Text Output</span><button class="details btn-sm" type="button" aria-expanded="false">Details</button></div>
             <label class="check"><input type="checkbox" name="conversation"><span>Conversation Text<small>Captions of what you and Claude say. Claude still listens while they're hidden.</small></span></label>
@@ -1271,7 +1295,7 @@
     $('.pill').addEventListener('click', actions.pill);
     const typeBtn = $('.type');
     typeBtn.addEventListener('click', () => { form.classList.toggle('on'); if (form.classList.contains('on')) input.focus(); fitPanel(); });
-    const panel = $('.panel'), gear = $('.gear'), modeSel = $('.vmode'), pick = $('.pick'), voiceSel = $('.voice'), hint = $('.hint');
+    const panel = $('.panel'), gear = $('.gear'), modeSel = $('.vmode'), pick = $('.pick'), voiceSel = $('.voice'), hint = $('.voices .hint'), turns = $('.turns'), vgroups = $('.vgroups');
     // While the panel shows, the column keeps the width it had, so the panel's own width doesn't widen the typing box and Send under it.
     const showPanel = (on) => {
       if (on !== panel.classList.contains('on')) wrap.style.width = on ? `${wrap.getBoundingClientRect().width}px` : '';
@@ -1304,13 +1328,13 @@
       const path = e.composedPath();
       if (!path.includes(panel) && !path.includes(gear) && !path.includes(typeBtn)) showPanel(false);
     }, true);
-    gear.addEventListener('click', () => { showPanel(!panel.classList.contains('on')); if (panel.classList.contains('on')) modeSel.focus(); });
+    gear.addEventListener('click', () => { showPanel(!panel.classList.contains('on')); if (panel.classList.contains('on')) (panel.querySelector('.vbtn') || modeSel).focus(); });
     root.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape' || !panel.classList.contains('on')) return;
       e.stopPropagation(); showPanel(false); gear.focus(); // don't also interrupt Claude
     });
-    modeSel.addEventListener('change', () => { pick.hidden = modeSel.value !== 'chosen'; actions.voiceMode(modeSel.value); });
-    voiceSel.addEventListener('change', () => actions.voice(voiceSel.value));
+    modeSel.addEventListener('change', () => actions.voiceMode(modeSel.value));
+    voiceSel.addEventListener('change', () => { const v = voiceSel.value; voiceSel.value = ''; if (v) actions.voice(v); });
     const textOutBox = $('.text-out'), detailsBtn = $('.text-out .details');
     detailsBtn.addEventListener('click', () => detailsBtn.setAttribute('aria-expanded', String(textOutBox.classList.toggle('open'))));
     const checks = [...root.querySelectorAll('.text-out input')];
@@ -1547,20 +1571,57 @@
         if (!importantCap.classList.contains('pinned')) importantCap.hidden = true;
       },
       askPassphrase() { passForm.classList.add('on'); passInput.focus(); },
-      setVoices(list, selected) {
+      /** More Browser Voices: all the browser's English voices, by quality tier; choosing one turns it on. */
+      setVoices(list) {
         const groups = [];
         list.forEach((v) => { const t = voiceTier(v); (groups[t] = groups[t] || []).push(v); });
-        voiceSel.replaceChildren(new Option('Auto (best available)', ''));
+        voiceSel.replaceChildren(new Option('Add a browser voice…', ''));
         groups.forEach((vs, t) => {
           const g = document.createElement('optgroup');
           g.label = VOICE_TIERS[t];
           vs.forEach((v) => g.appendChild(new Option(voiceLabel(v), v.voiceURI)));
           voiceSel.appendChild(g);
         });
-        voiceSel.value = list.some((v) => v.voiceURI === selected) ? selected : '';
+        voiceSel.value = '';
+        pick.hidden = !list.length;
       },
-      setVoiceMode(m) { modeSel.value = m; pick.hidden = m !== 'chosen'; },
-      setVoiceInfo(m, name) { hint.textContent = VOICE_HINTS[m] + (name && m !== 'chosen' ? ` Now: ${name}.` : ''); },
+      setVoiceMode(m) { modeSel.value = m === 'random' ? 'random' : 'response'; },
+      /** count: how many voices are on. name: the one speaking now. */
+      setVoiceInfo(m, name, count) {
+        turns.hidden = count === 1;
+        hint.textContent = count === 1 ? `${name} speaks each reply.`
+          : `${count ? 'They take turns' : 'With none on, the browser’s best voices take turns'}, ${m === 'random' ? 'a new one each conversation' : 'each reply’s mood picking one'}.${name ? ` Now: ${name}.` : ''}`;
+      },
+      /** The voices, grouped by source: [{ title, note, voices: [{ id, name, note, on, failed }], keys, remove }]. */
+      setVoiceGroups(groups) {
+        vgroups.replaceChildren(...groups.map((g) => {
+          const box = make('div', 'vg'), head = make('div', 'vg-head');
+          head.append(make('span', '', g.title));
+          if (g.note) head.append(make('small', '', g.note));
+          box.append(head);
+          if (g.voices.length) {
+            const row = make('div', 'vbtns');
+            g.voices.forEach((v) => {
+              const b = make('button', `vbtn${v.failed ? ' failed' : ''}`, v.name);
+              b.type = 'button';
+              b.setAttribute('aria-pressed', String(!!v.on));
+              b.title = v.failed ? `Not speaking: ${v.failed}` : v.note || '';
+              b.addEventListener('click', () => actions.toggleVoice(v.id));
+              row.append(b);
+            });
+            box.append(row);
+          }
+          if (g.detail) box.append(make('small', '', g.detail));
+          if (g.keys || g.remove) {
+            const a = make('button', 'link', g.keys ? 'Add a key' : g.remove);
+            a.type = 'button';
+            a.addEventListener('click', () => { if (g.keys) { showPanel(false); actions.keys(); } else actions.removeKokoro(); });
+            box.append(a);
+          }
+          return box;
+        }));
+        fitPanel();
+      },
       /** Text Output: { conversation, important, align, words, sets } as booleans. noWords: the page turned the floating words off (data-words). */
       /** Listening: { overlap, endPause, micBack }; noSR: no speech recognition here, so the section is hidden. */
       // stt: the bridge's speech to text ({ name, model, local }), or null where there's none. Without the browser's own
@@ -1697,6 +1758,12 @@
   const SPOKEN_SENTENCES = 2, SPOKEN_WORDS = 40;
   let unspoken = [], spokenN = 0, spokenW = 0;
   let speakQueue = [], speaking = null, streamDone = true, ttsUnlocked = false, voice = null, currentSentence = '';
+  // Server voices (shared/tts/, js/voice-audio.js): the voice speaking now, its player, and the Audio element it plays
+  // through, unlocked at the page's first tap. kokoroWebState, for Kokoro in this browser: '', agreed (in an earlier
+  // visit), ready, gone (its files were removed) or declined.
+  let curVoice = null, player = null, playerReady = null, kokoroWeb = null, kokoroWebState = '', kokoroWebSlow = false, serverAudioUnlocked = false;
+  const serverAudio = typeof Audio === 'function' ? new Audio() : null;
+  const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
   let audioPaused = false, motionPaused = false, listenPaused = false;
   let voiceBlockNoted = false; // a "voice was blocked" note shows once, until speech works again
   let elsewhere = false;   // voice was turned off here when another of the site's tabs turned it on (one talking tab)
@@ -1723,20 +1790,18 @@
       submitPassphrase(value).then(() => { if (t) this.typed(t); }); // ask again the question that waited for it
     },
     voiceMode(m) {
-      voiceMode = m; currentURI = '';
+      voiceMode = m;
       store(MODE_KEY, m);
-      pickVoice(); previewVoice();
+      showVoices();
     },
-    voice(uri) {
-      chosenVoice = uri;
-      store(VOICE_KEY, uri);
-      pickVoice(); previewVoice();
-    },
+    voice(uri) { toggleVoice(`browser:${uri}`, true); }, // More Browser Voices
+    toggleVoice: (id) => toggleVoice(id),
+    removeKokoro: () => removeKokoroWeb(),
     audio() { setAudioPaused(!audioPaused); },
     motion() { setMotionPaused(!motionPaused); },
     hold() { hold(!(audioPaused || motionPaused || listenPaused)); }, // the widget's own play button
     playAdopted() { syncPlayButton(); },
-    panelOpened() { checkAgent(); },
+    panelOpened() { checkAgent(); loadVoices(); },
     keys: setMyKeys,
     textOutput(name, on) {
       textOut[name] = on;
@@ -1793,6 +1858,7 @@
     audioPaused = !!p;
     if (audioPaused) speakQueue.filter((it) => it.showWords).forEach((it) => { wordField.sentence(it.text, null); it.showWords = false; }); // as in enqueueSpeech
     if (tts) { if (audioPaused) tts.pause(); else tts.resume(); }
+    if (player) { if (audioPaused) player.pause(); else player.resume(); }
     showState();
     ui.setPaused(audioPaused, motionPaused, listenPaused); syncPlayButton();
   }
@@ -1850,6 +1916,12 @@
   function unlockAudio() {
     if (!ttsUnlocked && tts) { try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; tts.speak(u); ttsUnlocked = true; } catch (e) { /* ignore */ } }
     if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    // The server voices' Audio element, played once from a tap so it may play later without one (Safari, iOS).
+    if (serverAudio && !serverAudioUnlocked) {
+      serverAudioUnlocked = true;
+      serverAudio.src = SILENT_WAV;
+      serverAudio.play().then(() => { if (serverAudio.src === SILENT_WAV) serverAudio.pause(); }, () => { serverAudioUnlocked = false; });
+    }
   }
   ['pointerdown', 'keydown', 'touchend'].forEach((ev) => document.addEventListener(ev, unlockAudio, { once: true, capture: true }));
 
@@ -1899,14 +1971,18 @@
   }
 
   // The settings panel's choices are remembered in this browser and win over data-voice / data-voice-mode.
-  const VOICE_KEY = 'voice-chat:voice', MODE_KEY = 'voice-chat:voice-mode';
-  let voiceMode = VOICE_MODES.includes(cfg.voiceMode) ? cfg.voiceMode : (cfg.voice ? 'chosen' : 'response');
-  let chosenVoice = '', currentURI = '';
+  // voice-chat:pool, the voices turned on (setVoicePool), replaced voice-chat:voice, one chosen browser voice, which
+  // becomes a pool of that one voice. data-voice names a voice to start with until one is chosen here.
+  const VOICE_KEY = 'voice-chat:voice', MODE_KEY = 'voice-chat:voice-mode', POOL_KEY = 'voice-chat:pool';
+  let voiceMode = VOICE_MODES.includes(cfg.voiceMode) ? cfg.voiceMode : 'response';
+  let currentURI = '', voicePool = null;
   try {
-    const m = localStorage.getItem(MODE_KEY), v = localStorage.getItem(VOICE_KEY);
+    const m = localStorage.getItem(MODE_KEY), v = localStorage.getItem(VOICE_KEY), p = JSON.parse(localStorage.getItem(POOL_KEY) || 'null');
     if (VOICE_MODES.includes(m)) voiceMode = m;
-    if (v !== null && v !== 'random') chosenVoice = v; // "random" was stored here by an earlier version
+    if (Array.isArray(p)) voicePool = p.filter((id) => typeof id === 'string').slice(0, 40);
+    else if (v && v !== 'random' && m === 'chosen') voicePool = [`browser:${v}`];
   } catch (e) { /* storage blocked */ }
+  if (voiceMode === 'chosen') voiceMode = 'response';
   function store(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* storage blocked */ } }
 
   // The site's passphrase, when its Worker asks for one (TEAM_PASSPHRASE): kept in this browser for every tab on the site.
@@ -1958,10 +2034,11 @@
   const OWN_LABEL = { anthropic: 'Claude', google: 'Gemini', openai: 'OpenAI', xai: 'xAI', groq: 'Groq', perplexity: 'Perplexity', pollinations: 'Pollinations' };
   let ownKey = null;              // { name, key } while this page answers with the visitor's own key
   const failedOwnKeys = new Set(); // saved keys that already failed, so they aren't tried again until changed
-  async function savedKey() {
+  // names: the /keys page ids to look for, in order (the conversation's by default, OWN_LABEL).
+  async function savedKey(names = Object.keys(OWN_LABEL)) {
     let saved;
     try { saved = JSON.parse(localStorage.getItem('settings_api-keys') || '{}'); } catch (e) { return null; }
-    for (const name of Object.keys(OWN_LABEL)) {
+    for (const name of names) {
       const v = saved && saved[name];
       if (typeof v !== 'string' || !v) continue;
       const key = !v.startsWith('rsa:') && /^[A-Za-z0-9+/]+=*:[A-Za-z0-9+/]+=*$/.test(v) ? await decryptSavedKey(v).catch(() => '') : v;
@@ -2129,56 +2206,304 @@
 
   function englishVoices() { return tts ? rankVoices(tts.getVoices().filter((v) => /^en/i.test(v.lang || ''))) : []; }
 
-  // New voice for "random" and "response" modes, never the one just used. A style (from Claude's mood header) narrows it to voices that suit the reply.
+  // --- voices: the browser's own (speechSynthesis), and natural ones from the bridge or Worker (.../voices,
+  // shared/tts/index.js): Kokoro, Aura, Grok, ElevenLabs, OpenAI, Google, and Kokoro in this browser (kokoro-web,
+  // js/voice-kokoro.js). Each has an id, "source:voice" ("kokoro:af_heart", "browser:<voiceURI>"). The pool is the voices
+  // turned on, below a Talk Circle or in the ⚙ panel's Voices: one speaks every reply, and several take turns
+  // (voiceMode). Until a pool is chosen, it's data-voice's voice, else the default source's first voice (Kokoro on the
+  // bridge, Aura on the Worker), else the browser's best, changing with each reply as before. A voice that can't speak
+  // (no key, out of credits, offline) hands its sentence to the best browser voice, with a note saying why, once.
+  const VOICES_URL = cfg.endpoint.replace(/\/?$/, '/voices'), SPEAK_URL = cfg.endpoint.replace(/\/?$/, '/speak');
+  const OWN_VOICE_KEYS = ['xai', 'elevenlabs', 'openai', 'google-tts']; // /keys page ids a voice source can use
+  const SERVER_WAIT_MS = 9000; // a server voice not playing by then hands that sentence to the browser's voice
+  // Kokoro in a browser without WebGPU takes about twice a sentence's length to make it (js/voice-kokoro.js), so it's given longer.
+  const waitFor = (v) => (v.inBrowser && kokoroWebSlow ? 30000 : SERVER_WAIT_MS);
+  const kokoroWebSupported = typeof Worker === 'function' && typeof WebAssembly === 'object' && 'caches' in window && window.isSecureContext;
+  let voiceSources = [], defaultSource = 'browser', kokoroInstall = '', voicesReady = null;
+  const failedSources = new Map(), failCounts = new Map(), notedSources = new Set(); // source → why it can't speak on this page
+  const moduleURL = (name) => { try { return new URL(name, script.src).href; } catch (e) { return `/engine/js/${name}`; } };
+
+  function loadVoices() {
+    if (voicesReady) return voicesReady;
+    voicesReady = (async () => {
+      let own = [];
+      try { const saved = JSON.parse(localStorage.getItem('settings_api-keys') || '{}'); own = OWN_VOICE_KEYS.filter((n) => typeof saved[n] === 'string' && saved[n]); } catch (e) { /* none */ }
+      // The bridge starts loading Kokoro's model now when it's likely to speak (about 12 seconds the first time).
+      const warm = viaBridge && (!voicePool || !voicePool.length || voicePool.some((id) => id.startsWith('kokoro:')));
+      try {
+        const res = await fetch(`${VOICES_URL}?own=${own.join(',')}${warm ? '&warm=kokoro' : ''}`, { cache: 'no-store', credentials: viaBridge ? 'same-origin' : 'include' });
+        if (!res.ok) throw new Error(String(res.status));
+        const j = await res.json();
+        voiceSources = (Array.isArray(j.sources) ? j.sources : []).filter((src) => !(src.browser && (!kokoroWebSupported || j.sources.some((o) => o.id === 'kokoro' && o.voices))));
+        defaultSource = j.defaultSource || 'browser';
+        kokoroInstall = j.install || '';
+      } catch (e) { voiceSources = []; } // an older server, or none: the browser's voices
+      try { kokoroWebState = localStorage.getItem('voice-chat:kokoro') === 'agreed' ? 'agreed' : ''; } catch (e) { /* storage blocked */ }
+      curVoice = null;
+      pickVoice();
+    })();
+    return voicesReady;
+  }
+
+  function browserVoice(v) {
+    return { id: `browser:${v.voiceURI}`, voiceId: v.voiceURI, name: shortVoiceName(v).replace(/\s*\(.*$/, ''), source: 'browser', label: 'Browser', lang: v.lang, browser: v, tier: voiceTier(v) };
+  }
+  const serverVoices = () => voiceSources.flatMap((src) => (src.voices || []).map((v) => ({ ...v, id: `${src.id}:${v.id}`, voiceId: v.id, source: src.id, label: src.label, inBrowser: !!src.browser })));
+  const allVoices = () => serverVoices().concat(englishVoices().map(browserVoice));
+  const voiceById = (id) => allVoices().find((v) => v.id === id) || null;
+  const shownVoice = (v) => (v ? (v.source === 'browser' ? v.name : `${v.name} (${v.label})`) : '');
+  function poolIds() {
+    if (voicePool) return voicePool;
+    if (cfg.voice) {
+      const n = cfg.voice.toLowerCase();
+      const v = allVoices().find((x) => x.name.toLowerCase() === n || (x.browser && x.browser.name.toLowerCase().includes(n)));
+      if (v) return [v.id];
+    }
+    const src = voiceSources.find((x) => x.id === defaultSource && x.voices && x.voices.length);
+    return src ? [`${src.id}:${src.voices[0].id}`] : [];
+  }
+  // A voice that can speak now: a server one whose source hasn't failed here, and Kokoro in this browser once agreed to.
+  const usableVoice = (v) => !!v && (v.source === 'browser' || (!failedSources.has(v.source) && (!v.inBrowser || kokoroWebState === 'agreed' || kokoroWebState === 'ready')));
+  const suitsStyle = (v, style) => v.style === style || (v.browser && (VOICE_STYLES[style] || []).some((n) => shortVoiceName(v.browser).toLowerCase().startsWith(n.toLowerCase())));
+  function bestBrowserVoice(lang) {
+    const vs = tts ? tts.getVoices() : [];
+    const l = String(lang || cfg.lang).toLowerCase().slice(0, 2);
+    return rankVoices(vs.filter((v) => v.lang && v.lang.toLowerCase().startsWith(l)))[0] || englishVoices()[0] || null;
+  }
+  function useVoice(v) {
+    curVoice = v;
+    voice = v.browser || bestBrowserVoice(v.lang); // a server voice's sentences fall back to this one
+    if (v.browser) currentURI = v.browser.voiceURI;
+    ui.setVoiceInfo(voiceMode, shownVoice(v), poolIds().length);
+  }
+
+  // For Claude's prompt (shared/voice-prompt.js voiceRules): the voice speaking now, the voices on, and whether Claude
+  // picks the next one (its header's speaker, as "George (Kokoro)").
+  function voiceContext() {
+    const desc = (v) => v && { name: v.name, label: v.label, lang: v.lang, gender: v.gender || '', style: v.style || '' };
+    const on = poolIds().map(voiceById).filter(usableVoice);
+    return { now: desc(curVoice), on: on.map(desc), choose: voiceMode === 'response' && on.length > 1 };
+  }
+  function speakerVoice(name) {
+    name = String(name || '').trim().toLowerCase();
+    if (!name) return null;
+    const on = poolIds().map(voiceById).filter(usableVoice);
+    const full = (v) => (v.source === 'browser' ? v.name : `${v.name} (${v.label})`).toLowerCase();
+    const named = on.filter((v) => v.name.toLowerCase() === name.replace(/\s*\(.*$/, ''));
+    return on.find((v) => full(v) === name) || (named.length === 1 ? named[0] : null);
+  }
+
+  // The next voice: from the pool, the one suiting the reply's style (from Claude's mood header), never the one just
+  // used; with none on, a new top browser voice, the style narrowing it to voices that suit the reply.
   function rollVoice(style) {
-    if (voiceMode === 'chosen') return;
+    const pool = poolIds().map(voiceById).filter(usableVoice);
+    if (pool.length) {
+      const fresh = pool.filter((v) => !curVoice || v.id !== curVoice.id);
+      const suits = style ? fresh.filter((v) => suitsStyle(v, String(style).toLowerCase())) : [];
+      const list = suits.length ? suits : fresh.length ? fresh : pool;
+      return useVoice(list[Math.floor(Math.random() * list.length)]);
+    }
     const english = englishVoices();
     const fresh = (list) => list.filter((v) => v.voiceURI !== currentURI);
     const best = english.filter((v) => voiceTier(v) === 0);
     const top = best.length >= 3 ? best : english.filter((v) => voiceTier(v) <= 1).concat(english.slice(0, 5));
-    let pool = [];
+    let list = [];
     const names = style && VOICE_STYLES[String(style).toLowerCase()];
     if (names) {
       const suits = english.filter((v) => voiceTier(v) <= 2 && names.some((n) => shortVoiceName(v).toLowerCase().startsWith(n.toLowerCase())));
       const floor = suits.length ? Math.max(voiceTier(suits[0]), 1) : 0; // english is ranked, so suits[0] is the best match
-      pool = fresh(suits.filter((v) => voiceTier(v) <= floor));
-      if (!pool.length) pool = fresh(suits); // a fitting standard voice beats an unfitting premium one
+      list = fresh(suits.filter((v) => voiceTier(v) <= floor));
+      if (!list.length) list = fresh(suits); // a fitting standard voice beats an unfitting premium one
     }
-    if (!pool.length) pool = fresh(top);
-    if (!pool.length) pool = top;
-    const v = pool[Math.floor(Math.random() * pool.length)];
-    if (!v) return;
-    currentURI = v.voiceURI; voice = v;
-    ui.setVoiceInfo(voiceMode, shortVoiceName(v));
+    if (!list.length) list = fresh(top);
+    if (!list.length) list = top;
+    const v = list[Math.floor(Math.random() * list.length)] || bestBrowserVoice();
+    if (v) useVoice(browserVoice(v));
   }
 
+  // Keeps the voice speaking now when it's still on, else picks one; shows the voices in the ⚙ panel.
   function pickVoice() {
-    if (!tts) return;
-    const vs = tts.getVoices();
-    if (!vs.length) return;
-    ui.setVoices(englishVoices(), chosenVoice);
-    if (voiceMode !== 'chosen') {
-      voice = vs.find((v) => v.voiceURI === currentURI) || null;
-      if (voice) ui.setVoiceInfo(voiceMode, shortVoiceName(voice)); else rollVoice();
-      if (voice) return;
-    }
-    const lang = cfg.lang.toLowerCase().slice(0, 2);
-    const pool = rankVoices(vs.filter((v) => v.lang && v.lang.toLowerCase().startsWith(lang)));
-    voice = (chosenVoice && vs.find((v) => v.voiceURI === chosenVoice))
-      || (cfg.voice && vs.find((v) => v.name.toLowerCase().includes(cfg.voice.toLowerCase())))
-      || pool[0] || null;
-    ui.setVoiceInfo(voiceMode, '');
+    if (tts) ui.setVoices(englishVoices());
+    const ids = poolIds();
+    if (!curVoice || (ids.length ? !ids.includes(curVoice.id) : curVoice.source !== 'browser') || !usableVoice(curVoice)) rollVoice();
+    showVoices();
   }
 
-  // Preview only while not mid-conversation, so the recogniser can't take the sample as something you said.
-  function previewVoice() {
-    if (!voice || !tts || !(mode === 'off' || mode === 'wake' || mode === 'error')) return;
-    tts.cancel();
-    const u = new SpeechSynthesisUtterance(`Hi, I’m ${shortVoiceName(voice).replace(/\s*\(.*$/, '')}.`);
-    u.voice = voice; u.lang = voice.lang; u.rate = 1.02;
+  // The ⚙ panel's Voices, by source, and the event the Talk Circle's buttons follow.
+  function showVoices() {
+    const on = new Set(poolIds());
+    const item = (v) => ({ id: v.id, name: v.name, note: v.note || voiceLabel(v.browser || { name: v.name, lang: v.lang || 'en-US' }), on: on.has(v.id), failed: failedSources.get(v.source) || '' });
+    const groups = voiceSources.map((src) => {
+      const g = { title: src.label, note: src.browser ? 'in this browser' : src.local ? 'on this computer' : src.id === 'aura' ? 'Deepgram, on Cloudflare' : '', voices: (src.voices || []).map((v) => item({ ...v, id: `${src.id}:${v.id}`, source: src.id })) };
+      if (src.browser) {
+        g.detail = kokoroInstall ? `Faster from the bridge: ${kokoroInstall}` : 'A one-time download of 115 to 185 MB, after you agree.';
+        if (kokoroWebState === 'agreed' || kokoroWebState === 'ready') g.remove = 'Remove Kokoro files';
+      }
+      return g;
+    }).filter((g) => g.voices.length);
+    const browserTop = englishVoices().filter((v) => voiceTier(v) <= 1).slice(0, 8).map(browserVoice);
+    const browserOn = [...on].filter((id) => id.startsWith('browser:') && !browserTop.some((v) => v.id === id)).map(voiceById).filter(Boolean);
+    if (browserTop.length + browserOn.length) groups.push({ title: 'Browser', note: 'built in', voices: browserTop.concat(browserOn).map(item) });
+    // Sources needing a key, in one line: a key from the Keys page adds their voices.
+    const keyed = voiceSources.filter((src) => src.needsKey && !src.voices).map((src) => src.name);
+    if (keyed.length) groups.push({ title: 'With a key', voices: [], keys: true,
+      detail: `${keyed.length > 1 ? `${keyed.slice(0, -1).join(', ')} and ${keyed[keyed.length - 1]}` : keyed[0]} voices, with your own key from the Keys page.` });
+    ui.setVoiceGroups(groups);
+    ui.setVoiceMode(voiceMode);
+    ui.setVoiceInfo(voiceMode, shownVoice(curVoice), on.size);
+    emit('voices', { choices: voiceChoices(), pool: [...on] });
+  }
+
+  // 2 to 10 quality voices for the buttons below a Talk Circle: the default source's best, a couple from each other
+  // source, Kokoro in the browser, the browser's best Premium, Enhanced, Natural or Google voices, and any others on.
+  function voiceChoices(max = 10) {
+    const on = new Set(poolIds()), out = [];
+    const add = (v) => { if (v && out.length < max && !out.some((x) => x.id === v.id)) out.push(v); };
+    const server = serverVoices();
+    server.filter((v) => v.source === defaultSource).slice(0, 4).forEach(add);
+    voiceSources.filter((src) => src.id !== defaultSource && src.voices).forEach((src) => server.filter((v) => v.source === src.id).slice(0, 2).forEach(add));
+    englishVoices().filter((v) => voiceTier(v) <= 1).slice(0, 2).map(browserVoice).forEach(add);
+    [...on].map(voiceById).forEach(add);
+    return out.map((v) => ({ id: v.id, name: v.name, label: v.label, source: v.source, lang: v.lang, note: v.note || '', on: on.has(v.id), failed: failedSources.get(v.source) || '' }));
+  }
+
+  // Turns voices on (the pool), and greets with the one just turned on. Kokoro in this browser asks first (its download).
+  async function setVoicePool(ids, greet = true) {
+    await loadVoices();
+    ids = [...new Set((Array.isArray(ids) ? ids : [ids]).map(String))].filter((id) => voiceById(id)).slice(0, 40);
+    const before = new Set(poolIds());
+    const added = ids.filter((id) => !before.has(id));
+    for (const id of added) {
+      const v = voiceById(id);
+      failedSources.delete(v.source); failCounts.delete(v.source); notedSources.delete(v.source); // chosen again, so it gets another try
+      if (v.inBrowser && !(await kokoroWebReady(true))) ids = ids.filter((x) => x !== id);
+    }
+    voicePool = ids;
+    store(POOL_KEY, JSON.stringify(ids));
+    const last = voiceById(added.filter((id) => ids.includes(id)).pop());
+    if (last) useVoice(last); else if (!curVoice || !ids.includes(curVoice.id)) { curVoice = null; rollVoice(); }
+    showVoices();
+    if (last && greet) previewVoice(last);
+  }
+  function toggleVoice(id, on) {
+    const ids = poolIds().slice(), i = ids.indexOf(id);
+    if (on === undefined) on = i < 0;
+    if (on && i < 0) ids.push(id);
+    if (!on && i >= 0) ids.splice(i, 1);
+    return setVoicePool(ids);
+  }
+
+  // A greeting in that voice, only while there's no conversation, so the recogniser can't take it as something you said.
+  async function previewVoice(v) {
+    v = v || curVoice;
+    if (!v || !(mode === 'off' || mode === 'wake' || mode === 'error')) return;
+    const text = greetingFor(v);
+    if (tts) tts.cancel();
+    if (player) player.stop();
+    if (v.source !== 'browser') {
+      if (!usableVoice(v)) return voiceFailed(v, { error: failedSources.get(v.source) || 'it isn’t ready yet' }, true);
+      const p = await audioPlayer().catch(() => null);
+      if (!p) return;
+      const u = p.speak(text, (signal) => fetchSpeech(v, text, signal), `${v.id}|${text}`);
+      u.addEventListener('error', (e) => { voiceFailed(v, e, true); showVoices(); });
+      return;
+    }
+    if (!tts || !v.browser) return;
+    const u = new SpeechSynthesisUtterance(text);
+    u.voice = v.browser; u.lang = v.browser.lang; u.rate = 1.02;
     tts.speak(u);
   }
   if (tts) { pickVoice(); tts.addEventListener && tts.addEventListener('voiceschanged', pickVoice); }
+
+  // --- server voices: js/voice-audio.js plays them, imported the first time one speaks
+  function audioPlayer() {
+    if (!playerReady) playerReady = import(moduleURL('voice-audio.js')).then((m) => (player = m.createPlayer(serverAudio || new Audio())), (err) => { playerReady = null; throw err; });
+    return playerReady;
+  }
+  // One sentence as { blob, words } from the bridge or Worker (.../speak), or from Kokoro in this browser.
+  async function fetchSpeech(v, text, signal) {
+    if (v.inBrowser) {
+      if (kokoroWebState !== 'ready' && !(await kokoroWebReady(false))) {
+        kokoroWebState = 'gone';
+        throw Object.assign(new Error('Kokoro’s files are no longer in this browser. Turn a Kokoro voice on again to download them'), { needsKey: true });
+      }
+      const k = await kokoroModule();
+      let timer;
+      const slow = new Promise((resolve, reject) => { timer = setTimeout(() => reject(Object.assign(new Error('Kokoro is still getting ready in this browser.'), { slow: true })), waitFor(v) - 500); });
+      return Promise.race([k.speak(text, v.voiceId, signal), slow]).finally(() => clearTimeout(timer));
+    }
+    const src = voiceSources.find((x) => x.id === v.source);
+    const own = src && src.needsKey && src.own ? await savedKey([src.own]) : null;
+    const res = await fetch(SPEAK_URL, { method: 'POST', signal, credentials: viaBridge ? 'same-origin' : 'include',
+      headers: { 'content-type': 'application/json',
+        ...(own && { 'x-provider-name': own.name, 'x-provider-key': own.key }),
+        ...(passphrase() && { 'x-team-passphrase': passphrase() }) },
+      body: JSON.stringify({ source: v.source, voice: v.voiceId, text, lang: v.lang || cfg.lang }) });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw Object.assign(new Error(j.error || `${viaBridge ? 'The bridge' : 'The server'} answered ${res.status}.`), { status: res.status, passphrase: !!j.passphrase, needsKey: !!j.needsKey });
+    }
+    let words = null;
+    try { words = JSON.parse(res.headers.get('x-voice-words') || 'null'); } catch (e) { /* estimated instead */ }
+    return { blob: await res.blob(), words };
+  }
+  // Why a server voice didn't speak, said once per source. A missing key, a refusal or a second failure sets the
+  // source aside for this page (until it's chosen again); a slow start only hands over that one sentence.
+  function voiceFailed(v, err, always) {
+    const why = String((err && (err.error || err.message)) || 'it didn’t answer').replace(/\.$/, '');
+    if (err && err.error === 'not-allowed') return noteVoiceBlocked();
+    if (!err || !err.slow) {
+      const n = (failCounts.get(v.source) || 0) + 1;
+      failCounts.set(v.source, n);
+      if (n >= 2 || err.needsKey || err.passphrase || [401, 402, 403, 429, 501].includes(err.status)) failedSources.set(v.source, why);
+    }
+    if (always || !notedSources.has(v.source)) {
+      notedSources.add(v.source);
+      ui.note(`${v.label} couldn’t speak${always ? '' : ', so a browser voice is speaking instead'}: ${why}.`, 9000);
+    }
+    if (failedSources.has(v.source) && curVoice && curVoice.source === v.source) rollVoice();
+  }
+  function noteVoiceBlocked() {
+    if (voiceBlockNoted) return;
+    voiceBlockNoted = true;
+    ui.note(`${isBrave ? 'Brave' : 'Your browser'} blocked ${shownName()}’s voice. Click anywhere on the page, or allow Autoplay for this site in the site settings (left of the address).`, 15000);
+  }
+  // The next sentence, fetched while this one plays.
+  function prefetchNext() {
+    const next = speakQueue[0], v = curVoice;
+    if (!next || !player || !v || v.source === 'browser' || !usableVoice(v)) return;
+    const text = unmark(next.text);
+    player.prefetch(text, (signal) => fetchSpeech(v, text, signal), `${v.id}|${text}`);
+  }
+
+  // --- Kokoro in this browser (js/voice-kokoro.js): agreed to once in its dialog, which shows again if its files are gone.
+  function kokoroModule() {
+    if (!kokoroWeb) kokoroWeb = import(moduleURL('voice-kokoro.js')).catch((err) => { kokoroWeb = null; throw err; });
+    return kokoroWeb;
+  }
+  // Whether Kokoro can speak here: its files cached (loaded now, in the background), or downloaded after the dialog when ask.
+  async function kokoroWebReady(ask) {
+    if (!kokoroWebSupported) return false;
+    if (kokoroWebState === 'ready') return true;
+    let k;
+    try { k = await kokoroModule(); kokoroWebSlow = !!(await k.setup()).slow; } catch (e) { ui.note('Kokoro couldn’t load in this browser.', 8000); return false; }
+    if (await k.cached()) { kokoroWebState = 'ready'; k.load().catch((err) => voiceFailed({ source: 'kokoro-web', label: 'Kokoro' }, err)); return true; }
+    if (!ask) return false;
+    const ok = await k.confirm({ name: 'Kokoro' });
+    kokoroWebState = ok ? 'ready' : kokoroWebState === 'agreed' ? '' : 'declined';
+    showVoices();
+    return ok;
+  }
+  async function removeKokoroWeb() {
+    const k = await kokoroModule().catch(() => null);
+    if (k) await k.remove();
+    kokoroWebState = '';
+    const pool = poolIds().filter((id) => !id.startsWith('kokoro-web:'));
+    voicePool = pool; store(POOL_KEY, JSON.stringify(pool));
+    if (curVoice && curVoice.inBrowser) { curVoice = null; rollVoice(); }
+    showVoices();
+    ui.note('Kokoro’s files were removed from this browser.', 5000);
+  }
 
   // --- speech recognition
   function startRecognition() {
@@ -2541,6 +2866,11 @@
   function beginConversation(firstUtterance, typed) {
     claimVoice();
     history = []; pending = ''; queuedTurn = ''; logged = null;
+    // Kokoro in this browser: its model loads now, or, if its files are gone, the dialog asks before downloading them
+    // again. The browser's voice speaks until it's ready.
+    loadVoices().then(() => {
+      if (poolIds().some((id) => id.startsWith('kokoro-web:')) && kokoroWebState !== 'ready' && kokoroWebState !== 'declined') kokoroWebReady(true).then(() => pickVoice());
+    });
     if (voiceMode === 'random') rollVoice();
     scene.applyMood(MOODS.listening);
     scene.pulse(0.5);
@@ -2695,7 +3025,9 @@
     ui.claude(''); ui.important('');
     wordField.begin();
     // "Change for response": pick this reply's voice once the mood header is in, before the first sentence is spoken.
-    const voiceForReply = (style) => { if (voiceMode === 'response') rollVoice(style); };
+    // Claude names the reply's speaker in its header when several voices are on (voiceContext), say a British one for a
+    // question about England. Without one it names, the reply's style picks.
+    const voiceForReply = (style, speaker) => { if (voiceMode !== 'response') return; const v = speakerVoice(speaker); if (v) useVoice(v); else rollVoice(style); };
 
     const feedSpeech = (chunk) => {
       spokenText += chunk;
@@ -2746,14 +3078,14 @@
       const end = head.indexOf('</mood>');
       if (end >= 0) {
         moodDone = true;
-        let style = null;
+        let style = null, speaker = null;
         try {
           const mood = JSON.parse(head.slice(head.indexOf('>') + 1, end));
           scene.applyMood(mood); scene.pulse(0.35);
-          style = mood.voice;
+          style = mood.voice; speaker = mood.speaker;
           emit('mood', mood);
         } catch (err) { /* bad header: keep current visuals */ }
-        voiceForReply(style);
+        voiceForReply(style, speaker);
         const rest = head.slice(end + 7).replace(/^\s+/, '');
         if (rest) feedBody(rest);
       } else if (head.length > 600) { moodDone = true; voiceForReply(); feedBody(head); }
@@ -2769,7 +3101,7 @@
           // With their own key too, so a Worker that gives Claude tools (such as reading the site's code) can tell it's the team.
           ...(passphrase() && { 'x-team-passphrase': passphrase() }) },
         // page: where the person is on the site, so Claude can tell what they're looking at
-        body: JSON.stringify({ messages: history, page: location.pathname + location.hash, tab: tabId, output: { conversation: textOut.conversation, important: textOut.important, sets: textOut.words && textOut.sets && !wordField.off } }),
+        body: JSON.stringify({ messages: history, page: location.pathname + location.hash, tab: tabId, voice: voiceContext(), output: { conversation: textOut.conversation, important: textOut.important, sets: textOut.words && textOut.sets && !wordField.off } }),
       });
       if (!res.ok || !res.body) {
         const body = await res.json().catch(() => ({}));
@@ -2943,7 +3275,7 @@
     }
     if (showWords && audioPaused) { wordField.sentence(text, null); showWords = false; }
     speakQueue.push({ text, onDone, showWords });
-    if (!speaking) speakNext();
+    if (!speaking) speakNext(); else if (speakQueue.length === 1) prefetchNext();
   }
   function speakNext() {
     const item = speakQueue.shift();
@@ -2960,9 +3292,44 @@
     const words = spoken.split(/\s+/).length;
     // Engines sometimes never fire onend. While the voice is paused, the wait starts over.
     let watchdog;
-    const arm = () => { watchdog = setTimeout(() => (audioPaused ? arm() : finish()), 2500 + words * 520); };
-    arm();
+    const arm = (ms) => { clearTimeout(watchdog); watchdog = setTimeout(() => (audioPaused ? arm(ms) : finish()), ms); };
     speaking = item;
+    const v = curVoice;
+    if (v && v.source !== 'browser' && usableVoice(v)) { arm(waitFor(v) + 2500 + words * 520); return speakServer(item, spoken, v, finish, () => arm(2500 + words * 620)); }
+    arm(2500 + words * 520);
+    speakBrowser(item, spoken, finish);
+  }
+  // A sentence in a server voice (js/voice-audio.js). If it can't speak, or hasn't started within SERVER_WAIT_MS, the
+  // browser's voice says it instead. started: re-arms speakNext's watchdog for the sentence's length.
+  function speakServer(item, spoken, v, finish, started) {
+    let begun = false, u = null, wait = 0;
+    const fallback = (err) => {
+      clearTimeout(wait);
+      if (speaking !== item || begun) return;
+      begun = true;
+      if (u) u.cancel();
+      if (err) voiceFailed(v, err);
+      speakBrowser({ ...item, showWords: false }, spoken, finish); // the word field already has this sentence
+    };
+    audioPlayer().then((p) => {
+      if (speaking !== item) return;
+      u = p.speak(spoken, (signal) => fetchSpeech(v, spoken, signal), `${v.id}|${spoken}`);
+      if (item.showWords) wordField.sentence(item.text, u);
+      wait = setTimeout(() => fallback({ error: `${v.label} took too long`, slow: true }), audioPaused ? 1e9 : waitFor(v));
+      u.addEventListener('boundary', () => scene.pulse(0.06 + 0.12 * (scene.state.energy || 0)));
+      u.addEventListener('start', () => { clearTimeout(wait); begun = true; voiceBlockNoted = false; scene.pulse(0.15); echoSpoken(spoken); started(); });
+      u.addEventListener('end', () => { if (speaking === item) finish(); });
+      u.addEventListener('error', (e) => {
+        if (begun) return finish();
+        if (e.error === 'not-allowed') { clearTimeout(wait); begun = true; noteVoiceBlocked(); return finish(); }
+        fallback(e);
+      });
+      prefetchNext();
+    }, (err) => fallback({ error: `the player didn’t load (${err.message})` }));
+  }
+  // A sentence in the browser's own voice (speechSynthesis).
+  function speakBrowser(item, spoken, finish) {
+    const words = spoken.split(/\s+/).length;
     if (!tts) { if (item.showWords) wordField.sentence(item.text, null); setTimeout(finish, 400 + words * 60); return; }
     const u = new SpeechSynthesisUtterance(spoken);
     if (item.showWords) wordField.sentence(item.text, u);
@@ -2975,10 +3342,7 @@
     u.onerror = (e) => {
       // Browsers refuse to speak ("not-allowed") until the page has had a click or key press, and when the site's
       // Autoplay setting blocks sound. Without this note the reply would go by in silence.
-      if (e.error === 'not-allowed' && !voiceBlockNoted) {
-        voiceBlockNoted = true;
-        ui.note(`${isBrave ? 'Brave' : 'Your browser'} blocked ${shownName()}’s voice. Click anywhere on the page, or allow Autoplay for this site in the site settings (left of the address).`, 15000);
-      }
+      if (e.error === 'not-allowed') noteVoiceBlocked();
       finish();
     };
     // Brave (and other Chromium browsers) can leave speech stuck: a silent or finished utterance that still counts as
@@ -3015,6 +3379,7 @@
     speakQueue = []; streamDone = true;
     const s = speaking; speaking = null; currentSentence = '';
     if (tts) tts.cancel();
+    if (player) player.stop();
     wordField.finish();
     if (s && s.onDone) return s.onDone();
     if (mode === 'speaking' || mode === 'thinking') { setMode('listening'); resetIdle(); }
@@ -3160,6 +3525,7 @@
   // --- lifecycle
   async function start() {
     if (mode !== 'off' && mode !== 'error') return;
+    loadVoices();
     await statusReady; // whether the bridge can turn speech into text (transcriber)
     if (!SR && !bridgeSttReady()) {
       setMode('wake');
@@ -3221,6 +3587,17 @@
     get state() { return mode; },
     /** Whether listening is paused (the pause button), so a page's "I'm listening" can go. */
     get listenPaused() { return listenPaused; },
+    /** The voices to offer as buttons (2 to 10, below a Talk Circle): [{ id, name, label, source, lang, note, on, failed }].
+        The "voices" event (voice-chat:voices) tells when they, or which are on, change. */
+    voices: () => loadVoices().then(() => voiceChoices()),
+    /** Every voice available here, by id, including those not offered as buttons. */
+    allVoices: () => loadVoices().then(() => allVoices().map((v) => ({ id: v.id, name: v.name, label: v.label, source: v.source, lang: v.lang }))),
+    /** Turns on these voices (ids from voices()); several take turns. Each one newly on greets you. */
+    setVoicePool: (ids) => setVoicePool(ids),
+    toggleVoice: (id, on) => toggleVoice(id, on),
+    get voicePool() { return poolIds().slice(); },
+    /** The voice speaking now: { id, name, label }. */
+    get voice() { return curVoice && { id: curVoice.id, name: curVoice.name, label: curVoice.label }; },
     /** Whether voice is off here because another of the site's tabs turned it on. */
     get elsewhere() { return elsewhere; },
     get history() { return history.slice(); },

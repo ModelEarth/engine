@@ -85,6 +85,17 @@ html #fullscreen > #mainEarthDisplay .earth-zoom-controls { top: calc(var(--head
 /* Balanced lines, so neither leaves a word alone on its last line. */
 .talk-circle-question, .talk-circle-hint { text-wrap: balance; }
 .talk-circle-hint:empty, .talk-circle-links:empty { display: none; }
+/* Voice choices below the circle before a conversation begins (talk-circle.js showVoices): toggles, several can be on. */
+.talk-circle-voices { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: min(560px, calc(100vw - 32px)); margin-top: 14px; pointer-events: auto; }
+.talk-circle-voices[hidden] { display: none; }
+.talk-circle-area[hidden] > .talk-circle-voices { visibility: hidden; }
+.talk-circle-voice { display: inline-flex; align-items: baseline; gap: 6px; padding: 6px 14px; border: 1px solid rgba(255, 255, 255, 0.4); border-radius: 999px;
+  background: rgba(10, 12, 20, 0.35); color: #fff; font: inherit; font-size: 15px; line-height: 1.3; cursor: pointer; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.talk-circle-voice small { font-size: 12px; opacity: 0.75; }
+.talk-circle-voice:hover { background: rgba(255, 255, 255, 0.16); }
+.talk-circle-voice[aria-pressed="true"] { background: rgba(255, 255, 255, 0.92); border-color: #fff; color: #111; }
+.talk-circle-voice:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+.talk-circle-voice.failed { opacity: 0.55; text-decoration: line-through; }
 /* Links to the page where Claude can answer, below the hint when the voice widget isn't loaded (talk-circle.js showLinks). */
 .talk-circle-links { margin-top: -0.3em; font-size: 16px; line-height: 1.4; color: rgba(255, 255, 255, 0.85); text-wrap: balance; }
 .talk-circle-links a { color: #fff; text-decoration: underline; text-underline-offset: 2px; }

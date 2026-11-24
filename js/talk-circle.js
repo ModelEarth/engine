@@ -19,7 +19,12 @@
    of its area, which the words then keep clear of (data-words-avoid). Meanwhile it shows only the start of the
    next question ("What was your…"): Claude's follow-up question once the reply has it, else the next one in the
    list. A tap stops the reply and asks that question. Once the reply has been spoken, the circle comes back and
-   shows the question in full. Large words the circle crosses fade to TALK_DIM, so its question stays readable. */
+   shows the question in full. Large words the circle crosses fade to TALK_DIM, so its question stays readable.
+
+   Before a conversation begins, a row of 2 to 10 voices from the widget (VoiceChat.voices()) shows below the circle as
+   toggles: several can be on, and they take turns. Each greets you when it's turned on. Once a conversation begins
+   (a tap on the circle, speech or typing), the row goes for good on this page, and voices change in the widget's ⚙
+   panel instead, which shares the same choice. */
 (function () {
   "use strict";
   if (window.TalkCircle) return;
@@ -66,6 +71,7 @@
   let opts = {}, area = null, slot = null, zone = null;
   let questions = [], at = 0, timer = null, talking = false;
   let text = "", asked = "", small = false, spot = null, wordsField = null, dimFrame = 0;
+  let voicesRow = null, voicesDone = false; // the voice buttons, and whether a conversation has begun (they're gone)
 
   function el(tag, attrs = {}, ...children) {
     const e = document.createElement(tag);
@@ -95,12 +101,15 @@
     // The circle's slot keeps its full size while the circle shrinks inside it, so what's beside it in the area
     // (project/care: the title below it) stays put. It goes first, before what the page put in the area.
     slot = el("div", { class: "talk-circle-slot" }, zone);
-    area.prepend(slot);
+    voicesRow = el("div", { class: "talk-circle-voices", role: "group", "aria-label": "Voices" });
+    voicesRow.hidden = true;
+    area.prepend(slot, voicesRow);
     if (!area.isConnected) (opts.parent || document.body).append(area);
     // The voice widget's events don't bubble up from its target (#fullscreen), so they're heard capturing.
     document.addEventListener("voice-chat:state", (e) => {
       const st = e.detail?.state;
       watchWords();
+      if (!voicesRow?.childElementCount) showVoices(); // The widget has loaded
       showLinks(); // Not needed once the widget has loaded
       if (st !== "speaking") setSmall(false); // The reply has been spoken, or cut short
       if (!talking) return;
@@ -119,6 +128,8 @@
     document.addEventListener("voice-chat:stt", () => { if (!talking) setState("idle"); }, true);
     // While the widget's pause button holds listening, the circle doesn't say it's listening.
     document.addEventListener("voice-chat:pause", () => { if (zone?.dataset.state === "listening") setState("listening"); }, true);
+    document.addEventListener("voice-chat:voices", (e) => showVoices(e.detail?.choices), true);
+    document.addEventListener("voice-chat:start", endVoices, true);
     document.addEventListener("voice-chat:end", () => {
       if (!talking) return;
       setTalking(false);
@@ -133,6 +144,8 @@
     document.addEventListener("keydown", arrowKeys);
     if (opts.questions) setQuestions(opts.questions);
     else place();
+    showVoices();
+    if (document.readyState !== "complete") window.addEventListener("load", () => showVoices(), { once: true }); // The widget may load after the circle
     return api;
   }
 
@@ -167,6 +180,31 @@
         ? ["Interact on ", link(`http://${location.hostname}:${LOCAL_PORT}`, String(LOCAL_PORT)), " or ", link("https://neighborhood.org", "Neighborhood.org")]
         : ["Interact at ", link("https://neighborhood.org", "Neighborhood.org"), " or ", link("https://cloud.model.earth", "cloud.model.earth")]));
     });
+  }
+
+  // The voice buttons below the circle, until a conversation begins. choices: from the widget's voices event, else asked for.
+  function showVoices(choices) {
+    if (!voicesRow || voicesDone) return;
+    const vc = window.VoiceChat;
+    if (typeof vc?.voices !== "function") return;
+    if (["listening", "thinking", "speaking"].includes(vc.state)) return endVoices();
+    if (!choices) { vc.voices().then((c) => showVoices(c), () => {}); return; }
+    const had = !voicesRow.hidden;
+    voicesRow.hidden = choices.length < 2;
+    voicesRow.replaceChildren(...choices.map((v) => {
+      const b = el("button", { type: "button", class: `talk-circle-voice${v.failed ? " failed" : ""}`, "aria-pressed": String(!!v.on),
+        title: v.failed ? `Not speaking: ${v.failed}` : [v.note, v.on ? "Tap to turn off" : "Tap to hear this voice and turn it on"].filter(Boolean).join(". ") },
+        el("span", { text: v.name }), el("small", { text: v.source === "browser" ? "Browser" : v.label }));
+      b.addEventListener("click", (e) => { e.stopPropagation(); vc.toggleVoice(v.id); });
+      return b;
+    }));
+    if (had !== !voicesRow.hidden) place();
+  }
+  function endVoices() {
+    if (voicesDone || !voicesRow) return;
+    voicesDone = true;
+    voicesRow.remove();
+    place();
   }
 
   // The large words (.w) arriving in the voice widget's word layer shrink the circle. The layer is
@@ -349,11 +387,22 @@
     area.style.setProperty("--talk-d", `${d}px`);
     return d >= TALK_MIN;
   }
+  // In an area the page sized (opts.place), the voice buttons take their room from the circle, down to TALK_MIN, or
+  // else hide. placeCentered counts them already, with what else is in the area.
+  function fitVoices() {
+    if (!voicesRow?.isConnected || voicesRow.hidden || !opts.place) return true;
+    const h = area.clientHeight, row = voicesRow.offsetHeight + 14;
+    const d = parseFloat(area.style.getPropertyValue("--talk-d")) || 0;
+    if (!h || d + row <= h) return true;
+    if (h - row >= TALK_MIN) area.style.setProperty("--talk-d", `${Math.floor(h - row)}px`);
+    else voicesRow.hidden = true;
+    return true;
+  }
   // Shows the circle when it has questions and room (opts.place, else placeCentered). The page's place is asked
   // either way, since it may do more, such as project/goals marking its up/down arrow.
   function place() {
     if (!area) return;
-    const room = (opts.place || placeCentered)(area);
+    const room = (opts.place || placeCentered)(area) && fitVoices();
     const on = !!room && questions.length > 0;
     if (on) {
       if (area.hidden) setState(talking ? zone.dataset.state : "idle");

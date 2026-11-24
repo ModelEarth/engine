@@ -83,11 +83,45 @@ Where the person is: they're looking at this website's page ${path} as they talk
 - The path says which page it is, and the part after # holds its current settings (such as the state, view or report chosen), so tell them about what they're seeing now.
 - For questions about the site in general, or about another page, answer as usual.`;
 
+// The accent a voice's language and region give it, for the prompt's list of voices.
+const ACCENTS = { 'en-US': 'American English', 'en-GB': 'British English', 'en-AU': 'Australian English', 'en-IN': 'Indian English',
+  'en-IE': 'Irish English', 'en-ZA': 'South African English', 'en-CA': 'Canadian English', 'en-NZ': 'New Zealand English', 'en-SC': 'Scottish English',
+  en: 'English', es: 'Spanish', fr: 'French', de: 'German', it: 'Italian', pt: 'Portuguese', ja: 'Japanese', hi: 'Hindi', zh: 'Chinese' };
+function accentOf(lang) {
+  const [base, region] = String(lang || '').split(/[-_]/);
+  return ACCENTS[`${(base || '').toLowerCase()}-${(region || '').toUpperCase()}`] || ACCENTS[(base || '').toLowerCase()] || '';
+}
+const clean = (v, n) => String(v == null ? '' : v).replace(/[\u0000-\u001f<>{}"`]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
+const voiceEntry = (v) => v && typeof v === 'object' && clean(v.name, 40)
+  ? { name: clean(v.name, 40), label: clean(v.label, 30), accent: accentOf(v.lang), gender: clean(v.gender, 12), style: clean(v.style, 16) } : null;
+// "George (Kokoro)": how a voice is named in the prompt, and in the header's speaker field.
+const voiceName = (v) => (v.label && v.label !== 'Browser' ? `${v.name} (${v.label})` : v.name);
+const spokenName = (v) => (v.label && v.label !== 'Browser' ? `${v.name}, a ${v.label} voice` : `${v.name}, one of this browser's voices`);
+const voiceLine = (v) => `${voiceName(v)}: ${[v.accent, v.gender, v.style && `${v.style} style`].filter(Boolean).join(', ') || 'a browser voice'}`;
+
+/** The voice rules for one request. voice: { now, on, choose } from the page (js/voice-chat.js): the voice speaking
+    now, the voices turned on, and whether Claude picks among them (the header's speaker). */
+function voiceRules(voice) {
+  if (!voice || typeof voice !== 'object') return '';
+  const now = voiceEntry(voice.now);
+  const on = (Array.isArray(voice.on) ? voice.on : []).slice(0, 12).map(voiceEntry).filter(Boolean);
+  if (!now && !on.length) return '';
+  const choose = voice.choose === true && on.length > 1;
+  return `
+
+Your voice: what you write is spoken aloud by text to speech, in a voice the person chose. You're still Claude, the AI answering; the voice is how you sound.
+${choose ? `The voices turned on now, which take turns:\n${on.map((v) => `- ${voiceLine(v)}`).join('\n')}${now ? `\nThe last reply was spoken by ${voiceName(now)}.` : ''}
+- Add "speaker" to the mood header: the name of the voice for this reply, written exactly as listed, such as "${voiceName(on[0])}".
+- When the question is about a place or culture and one of these voices has its accent, pick that one: a British English voice for England or the UK, an Australian one for Australia, and so on. Otherwise pick the voice whose style best suits the reply, and vary it from one reply to the next.
+- This reply is spoken by the speaker you name.` : `${now ? `Your replies are spoken by ${voiceLine(now)}.` : ''}`}
+- If asked which voice is speaking, or what your voice is called, give the voice's name and where it comes from (such as "I'm Claude, speaking with ${spokenName(now || on[0])}"), rather than only saying you're Claude. The person can change voices under Voices in the ⚙ settings, or with the buttons below a talk circle before a conversation starts.`;
+}
+
 /** The system prompt for one request. output: { conversation, important, sets } from the page's Text Output choices.
-    page: the path (and hash) of the page the person is on. */
-export function systemPrompt(output, page) {
+    page: the path (and hash) of the page the person is on. voice: the voices (voiceRules). */
+export function systemPrompt(output, page, voice) {
   const path = pagePath(page);
-  return SYSTEM_PROMPT + (path ? pageRules(path) : '')
+  return SYSTEM_PROMPT + (path ? pageRules(path) : '') + voiceRules(voice)
     + (output?.conversation === false ? QUIET_RULES : '')
     + (output?.important === true ? IMPORTANT_RULES : '') + (output?.sets === true ? WORD_SET_RULES : '');
 }
