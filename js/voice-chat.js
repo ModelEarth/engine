@@ -55,6 +55,12 @@
  * whole turns: the setting is greyed out, with a note on why and on the Cloudflare quota); End of Your Turn, the pause that sends what you said
  * (0.8 s by default); and Mic Back After Claude, how long the mic waits after Claude speaks when it's off meanwhile.
  *   data-mic-level     "false" to skip the mic-level glow (if your device can't share the mic)
+ * One talking tab: voice is on in one of the site's tabs at a time (BroadcastChannel). Turning it on in a tab turns it
+ * off in the others, which show "Voice is on in another tab" and take it back when tapped, or by themselves when they're
+ * in sight again with the mic allowed, unless the other tab is in a conversation.
+ * The ⚙ panel's Finding This Tab choices (voice-chat:tab): when Claude starts to answer while its tab is out of sight,
+ * Bring This Tab Forward (on by default) has the local bridge switch to the tab and bring its window to the front (on a
+ * Mac, POST .../focus), and Notify Me (off by default) shows a notification whose click brings the tab forward.
  *
  * No keys live in this file. It talks only to your own endpoint (local bridge or Cloudflare Worker).
  * When the Worker asks for the site's passphrase (TEAM_PASSPHRASE), a field for it shows. The passphrase is kept in
@@ -75,7 +81,8 @@
  * the ⋯ menu have their own light bulbs. Choosing a conversation brings back the mood of its last reply (the colors
  * and motion), and a reply's light bulb brings back that reply's mood.
  * API: window.VoiceChat.{start, stop, say, ask, focusInput, hideText, end, interrupt, setMood, clearWords, pauseAudio, pauseMotion, openKeys, on}
- * Events (voice-chat:<type> on the widget's host, or VoiceChat.on(type)): state, start, reply, mood, end, and pause
+ * Events (voice-chat:<type> on the widget's host, or VoiceChat.on(type)): state, start, reply, mood, end, elsewhere
+ * (another tab turned voice on, so it's off here), and pause
  * ({ audio, motion, listening }: which are paused, after the pause button or a change to listening's pause).
  */
 (function () {
@@ -990,7 +997,7 @@
 
   // ------------------------------------------------------------------ UI (shadow DOM so page CSS never collides)
   function UI(host, actions) {
-    if (cfg.ui === 'none') return { setState() {}, user() {}, claude() {}, extras() {}, important() {}, note() {}, fade() {}, showInput() {}, askPassphrase() {}, setVoices() {}, setVoiceMode() {}, setVoiceInfo() {}, setTextOutput() {}, setListening() {}, setPaused() {}, setAgent() {}, addInput() {}, hideText() {}, rename() {}, boxes: () => [], play: null };
+    if (cfg.ui === 'none') return { setState() {}, user() {}, claude() {}, extras() {}, important() {}, note() {}, fade() {}, showInput() {}, askPassphrase() {}, setVoices() {}, setVoiceMode() {}, setVoiceInfo() {}, setTextOutput() {}, setListening() {}, setTabs() {}, setPaused() {}, setAgent() {}, addInput() {}, hideText() {}, rename() {}, boxes: () => [], play: null };
     let play = ds.playButton ? document.querySelector(ds.playButton) : null;
     const el = document.createElement('div');
     el.className = 'voice-chat-ui';
@@ -1084,8 +1091,8 @@
         .panel label { display: flex; flex-direction: column; gap: 5px; }
         .panel [hidden] { display: none; }
         .hint { font-size: 12px; line-height: 1.4; opacity: .75; }
-        .text-out, .agent, .listen { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.14); }
-        .text-out .head, .agent .head, .listen .head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
+        .text-out, .agent, .listen, .tabs { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.14); }
+        .text-out .head, .agent .head, .listen .head, .tabs .head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
         /* "Details" shows each choice's description under its one-line label. .btn-sm as in localsite's base.css, which can't reach in here. */
         .panel .btn-sm { display: inline-flex; padding: .2rem .55rem; font-size: .75rem; font-weight: 400; line-height: 1.2; border-radius: 2rem;
                          border: 1px solid rgba(255,255,255,.3); background: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
@@ -1105,7 +1112,9 @@
         .panel label.check { flex-direction: row; align-items: flex-start; gap: 8px; cursor: pointer; }
         .check input { flex: none; width: 16px; height: 16px; margin: 1px 0 0; accent-color: #9cc2e8; cursor: pointer; }
         .check small { display: none; margin-top: 2px; font-size: 12px; line-height: 1.35; opacity: .7; }
-        .text-out.open .check small, .listen.open .check small { display: block; }
+        .text-out.open .check small, .listen.open .check small, .tabs.open .check small { display: block; }
+        .tabs .check small.notify-note:not([hidden]) { display: block; opacity: .85; } /* why Notify Me is off */
+        .tabs .check small.notify-note[hidden] { display: none; }
         .listen .check small.off-note:not([hidden]) { display: block; opacity: .85; } /* Why Hear Me While Claude Speaks is off, shown without Details */
         .listen .check small.off-note[hidden], .listen .check small.off-why[hidden] { display: none; }
         .listen label:not(.check) > small { display: none; margin-top: -1px; font-size: 12px; line-height: 1.35; opacity: .7; }
@@ -1203,6 +1212,12 @@
             <label class="inline">End of Your Turn<select name="endPause"><option value="500">0.5 seconds</option><option value="800">0.8 seconds</option><option value="1000">1 second</option><option value="1500">1.5 seconds</option><option value="2500">2.5 seconds</option></select><small>How long a pause in your speaking sends what you said.</small></label>
             <label class="inline stt">Speech to Text<select name="stt"><option value="auto">Automatic</option><option value="browser">Browser</option><option value="bridge">Bridge</option></select><small>Automatic uses the browser's own speech input, and the bridge's where that's missing or isn't hearing you. The bridge records what you say and turns it into text on this computer (whisper.cpp) or with a cloud service.</small></label>
             <label class="inline mic-back">Mic Back After Claude<select name="micBack"><option value="250">0.25 seconds</option><option value="700">0.7 seconds</option><option value="1200">1.2 seconds</option></select><small>With Hear Me While Claude Speaks off, the mic is off while Claude talks and comes back this long after, once the echo has faded.</small></label>
+          </div>
+          <div class="tabs" role="group" aria-labelledby="cv-tabs">
+            <div class="head"><span id="cv-tabs">Finding This Tab</span><button class="details btn-sm" type="button" aria-expanded="false">Details</button></div>
+            <label class="check raise"><input type="checkbox" name="raise"><span>Bring This Tab Forward<small>When Claude starts to answer while this tab is out of sight, the local bridge switches to it and brings its window to the front (on a Mac, with the bridge running). The first time, macOS asks whether the bridge's app may control the browser.</small></span></label>
+            <label class="check notify"><input type="checkbox" name="notify"><span>Notify Me<small>When Claude starts to answer while this tab is out of sight, a notification shows. Clicking it brings this tab to the front. The browser asks once whether to allow notifications.</small><small class="notify-note" hidden></small></span></label>
+            <small class="hint one-tab">Voice is on in one of this site's tabs at a time: turning it on here turns it off in the others.</small>
           </div>
           <div class="agent" role="group" aria-labelledby="cv-agent">
             <div class="head"><span id="cv-agent">Agent</span><a class="btn-sm keys" href="#edit=keys" title="Set My Keys">Keys</a></div>
@@ -1304,6 +1319,10 @@
     listenDetails.addEventListener('click', () => listenDetails.setAttribute('aria-expanded', String(listenBox.classList.toggle('open'))));
     const listenInputs = [...root.querySelectorAll('.listen input, .listen select')];
     listenInputs.forEach((c) => c.addEventListener('change', () => actions.listening(c.name, c.type === 'checkbox' ? c.checked : c.name === 'stt' ? c.value : Number(c.value))));
+    const tabsBox = $('.tabs'), tabsDetails = $('.tabs .details');
+    tabsDetails.addEventListener('click', () => tabsDetails.setAttribute('aria-expanded', String(tabsBox.classList.toggle('open'))));
+    const tabInputs = [...root.querySelectorAll('.tabs input')];
+    tabInputs.forEach((c) => c.addEventListener('change', () => actions.tabs(c.name, c.checked)));
     const audioBtn = $('.audio'), motionBtn = $('.motion'), ownPlay = $('.playPauseButton');
     audioBtn.addEventListener('click', actions.audio);
     motionBtn.addEventListener('click', actions.motion);
@@ -1567,6 +1586,15 @@
         }
         $('.mic-back').hidden = !!o.overlap || noSR;
       },
+      /** Finding This Tab: { raise, notify }. canRaise: the bridge can bring tabs forward here; canNotify: this browser
+       *  shows notifications; notifyNote: why Notify Me is off, or ''. */
+      setTabs(o, canRaise, canNotify, notifyNote) {
+        tabInputs.forEach((c) => { c.checked = !!o[c.name]; });
+        $('.raise').hidden = !canRaise;
+        $('.notify').hidden = !canNotify;
+        const note = $('.notify-note');
+        note.hidden = !notifyNote; note.textContent = notifyNote || '';
+      },
       setTextOutput(o, noWords) {
         checks.forEach((c) => {
           c.checked = !!o[c.name];
@@ -1671,6 +1699,8 @@
   let speakQueue = [], speaking = null, streamDone = true, ttsUnlocked = false, voice = null, currentSentence = '';
   let audioPaused = false, motionPaused = false, listenPaused = false;
   let voiceBlockNoted = false; // a "voice was blocked" note shows once, until speech works again
+  let elsewhere = false;   // voice was turned off here when another of the site's tabs turned it on (one talking tab)
+  let lookedHere = false;  // this reply has already brought its tab forward, or notified (lookHere)
 
   const ui = UI(host, {
     log: readLog,
@@ -1720,6 +1750,11 @@
       if (name === 'stt') applyStt();
       if (name === 'overlap') micHold(mode === 'speaking'); // Turned on while Claude speaks, the mic comes back now
     },
+    tabs(name, value) {
+      tabOpt[name] = value;
+      store(TAB_KEY, JSON.stringify(tabOpt));
+      if (name === 'notify' && value) askToNotify(); else showTabs();
+    },
   });
 
   // The mic hears Claude through the speakers. With Hear Me While Claude Speaks (listenOpt.overlap) it stays on, and Claude's
@@ -1735,6 +1770,7 @@
   function setMode(m) {
     if (m === 'speaking' && mode !== 'speaking' && Date.now() >= echoUntil) { echoWords = []; echoStarts = new Set(); } // a new stretch of Claude's voice
     if (mode === 'speaking' && m !== 'speaking') echoUntil = Date.now() + ECHO_TAIL;
+    if (m === 'speaking' && mode !== 'speaking') lookHere();
     mode = m; micHold(m === 'speaking');
     showState();
     scene.setActivity(m === 'wake' ? 'idle' : m === 'off' ? 'off' : m);
@@ -1743,7 +1779,11 @@
   }
 
   const LABELS = { off: 'Enable voice', get wake() { return wakeByVoice() ? `Say “Ok ${shownName()}”` : viaBridgeStt ? 'Tap to talk' : 'Type to start'; }, listening: 'Listening… say “Thanks” to finish', thinking: 'Thinking…', speaking: 'Speaking… tap to interrupt', error: 'Voice unavailable' };
-  function showState() { ui.setState(mode, listenPaused && SR && mode !== 'off' && mode !== 'error' ? 'Listening paused' : LABELS[mode] || mode); }
+  function showState() {
+    ui.setState(mode, mode === 'off' && elsewhere ? 'Voice is on in another tab'
+      : (audioPaused || motionPaused) && (mode === 'speaking' || mode === 'thinking') ? 'Click play to resume.'
+      : listenPaused && SR && mode !== 'off' && mode !== 'error' ? 'Listening paused' : LABELS[mode] || mode);
+  }
 
   // --- pausing: Claude's voice holds mid-word (and later replies wait), and its motion freezes, until resumed. The pause
   // button (hold) also stops listening, words you were partway through included, and starts it again on resume.
@@ -1753,11 +1793,13 @@
     audioPaused = !!p;
     if (audioPaused) speakQueue.filter((it) => it.showWords).forEach((it) => { wordField.sentence(it.text, null); it.showWords = false; }); // as in enqueueSpeech
     if (tts) { if (audioPaused) tts.pause(); else tts.resume(); }
+    showState();
     ui.setPaused(audioPaused, motionPaused, listenPaused); syncPlayButton();
   }
   function setMotionPaused(p) {
     motionPaused = !!p;
     scene.setPaused(motionPaused); wordField.setPaused(motionPaused);
+    showState();
     ui.setPaused(audioPaused, motionPaused, listenPaused); syncPlayButton();
   }
   function setListenPaused(p) {
@@ -2225,7 +2267,6 @@
       reset();
       if (!enough) return;
       const wav = toWav(got, rate);
-      if (mode === 'listening') ui.user('…');
       queue = queue.then(() => transcribe(wav)).then(bridgeHeard).catch((err) => {
         console.warn('[voice-chat] speech to text through the bridge failed:', err.message);
         if (mode === 'listening') ui.user('');
@@ -2290,7 +2331,7 @@
   // On the deployed site the Worker transcribes (Whisper on Cloudflare), with the team passphrase or the visitor's own
   // key, as a conversation needs. A refusal asks for the passphrase.
   async function transcribe(wav) {
-    const res = await fetch(`${TRANSCRIBE_URL}?lang=${encodeURIComponent(cfg.lang)}`, { method: 'POST', body: wav,
+    const res = await fetch(`${TRANSCRIBE_URL}?lang=${encodeURIComponent(cfg.lang)}&tab=${tabId}`, { method: 'POST', body: wav,
       credentials: viaBridge ? 'same-origin' : 'include', // the passphrase's cookie
       headers: { 'content-type': 'audio/wav',
         ...(ownKey && { 'x-provider-name': ownKey.name, 'x-provider-key': ownKey.key }),
@@ -2498,6 +2539,7 @@
 
   // --- conversation
   function beginConversation(firstUtterance, typed) {
+    claimVoice();
     history = []; pending = ''; queuedTurn = ''; logged = null;
     if (voiceMode === 'random') rollVoice();
     scene.applyMood(MOODS.listening);
@@ -2523,6 +2565,7 @@
     if (context && !history.length) history.push({ role: 'user', content: String(context) });
     history.push({ role: 'assistant', content: question });
     logTurn('claude', question);
+    lookedHere = false;
     ui.claude(question, true);
     streamDone = true;
     enqueueSpeech(question);
@@ -2643,6 +2686,7 @@
 
   async function askClaude() {
     clearTimeout(idleTimer);
+    lookedHere = false;
     setMode('thinking');
     abortCtl = new AbortController();
     const ctl = abortCtl;
@@ -2725,7 +2769,7 @@
           // With their own key too, so a Worker that gives Claude tools (such as reading the site's code) can tell it's the team.
           ...(passphrase() && { 'x-team-passphrase': passphrase() }) },
         // page: where the person is on the site, so Claude can tell what they're looking at
-        body: JSON.stringify({ messages: history, page: location.pathname + location.hash, output: { conversation: textOut.conversation, important: textOut.important, sets: textOut.words && textOut.sets && !wordField.off } }),
+        body: JSON.stringify({ messages: history, page: location.pathname + location.hash, tab: tabId, output: { conversation: textOut.conversation, important: textOut.important, sets: textOut.words && textOut.sets && !wordField.off } }),
       });
       if (!res.ok || !res.body) {
         const body = await res.json().catch(() => ({}));
@@ -2880,6 +2924,7 @@
         transcriber = server.transcribe || null;
         showListening(); showState(); emit('stt', { via: viaBridgeStt ? transcriber && transcriber.name : SR ? 'browser' : 'none' });
       }
+      if (!!server.focus !== bridgeFocus) { bridgeFocus = !!server.focus; showTabs(); }
       if (server.worker) server = null; // The deployed Worker's: only speech to text, no view of running replies
     } catch (e) { server = null; }
     showAgent();
@@ -2924,7 +2969,8 @@
     if (voice) u.voice = voice;
     u.lang = (voice && voice.lang) || cfg.lang; u.rate = 1.02; u.pitch = 1;
     u.onboundary = (ev) => { if (ev.name === 'word' || ev.name === undefined) scene.pulse(0.06 + 0.12 * (scene.state.energy || 0)); };
-    u.onstart = () => { voiceBlockNoted = false; scene.pulse(0.15); echoSpoken(spoken); };
+    let started = false;
+    u.onstart = () => { started = true; voiceBlockNoted = false; scene.pulse(0.15); echoSpoken(spoken); };
     u.onend = finish;
     u.onerror = (e) => {
       // Browsers refuse to speak ("not-allowed") until the page has had a click or key press, and when the site's
@@ -2935,7 +2981,15 @@
       }
       finish();
     };
+    // Brave (and other Chromium browsers) can leave speech stuck: a silent or finished utterance that still counts as
+    // speaking, or the engine left paused, holds every later one in silence until a pause and resume. Clearing and
+    // resuming before each sentence, and nudging it once if it hasn't started, keeps the voice going.
+    if (!audioPaused) {
+      if (tts.speaking || tts.pending) tts.cancel();
+      tts.resume();
+    }
     tts.speak(u);
+    if (!audioPaused) setTimeout(() => { if (!started && !finished && !audioPaused) tts.resume(); }, 1000);
   }
   function afterSpeech() {
     wordField.finish();
@@ -2967,6 +3021,142 @@
   }
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && (mode === 'speaking' || mode === 'thinking')) holdReply(); });
 
+  // --- one talking tab: voice is on in one of the site's tabs at a time (same origin, same browser). Turning it on in a
+  // tab (start, or a conversation begun there) turns it off in the others, which say so and take it back when tapped.
+  // A tab out of sight keeps it until another takes it. A tab whose voice went elsewhere takes it back by itself when
+  // it's in sight again (with the mic already allowed), unless the other tab is in a conversation.
+  const tabId = Math.random().toString(36).slice(2);
+  const channel = 'BroadcastChannel' in window ? new BroadcastChannel('voice-chat') : null;
+  let otherBusy = false;
+  const inConversation = () => mode === 'listening' || mode === 'thinking' || mode === 'speaking';
+  function claimVoice() {
+    if (elsewhere) { elsewhere = false; showState(); }
+    if (channel) channel.postMessage({ t: 'claim', id: tabId });
+  }
+  function yieldVoice() {
+    if (mode === 'off') return;
+    stop(); releaseMic();
+    elsewhere = true; showState();
+    emit('elsewhere', {});
+  }
+  function releaseMic() {
+    if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
+    if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
+    scene.setLevelSource(null);
+  }
+  if (channel) channel.onmessage = ({ data: d }) => {
+    if (!d || d.id === tabId) return;
+    if (d.t === 'claim') yieldVoice();
+    else if (d.t === 'who' && inConversation()) channel.postMessage({ t: 'busy', id: tabId, to: d.id });
+    else if (d.t === 'busy' && d.to === tabId) otherBusy = true;
+  };
+  function otherTabBusy() {
+    if (!channel) return Promise.resolve(false);
+    otherBusy = false;
+    channel.postMessage({ t: 'who', id: tabId });
+    return new Promise((r) => setTimeout(() => r(otherBusy), 250));
+  }
+  async function autoStart() {
+    if (await otherTabBusy()) { elsewhere = true; showState(); return; }
+    start();
+  }
+  const micGranted = () => (navigator.permissions && navigator.permissions.query
+    ? navigator.permissions.query({ name: 'microphone' }).then((p) => p.state === 'granted').catch(() => false) : Promise.resolve(false));
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) { if (shown) { shown.close(); shown = null; } }
+    if (!document.hidden && elsewhere && mode === 'off' && cfg.autostart && SR) micGranted().then((ok) => { if (ok && elsewhere && !document.hidden) autoStart(); });
+  });
+
+  // --- finding the talking tab: when Claude starts to answer (once a reply) while this tab is out of sight, the local
+  // bridge brings it to the front (Bring This Tab Forward, on a Mac), or else a notification shows (Notify Me), and
+  // clicking it brings the tab forward: a page can only bring itself forward from a notification's click.
+  const TAB_KEY = 'voice-chat:tab';
+  const tabOpt = { raise: true, notify: false };
+  try {
+    const saved = JSON.parse(localStorage.getItem(TAB_KEY) || 'null');
+    if (saved) Object.keys(tabOpt).forEach((k) => { if (typeof saved[k] === 'boolean') tabOpt[k] = saved[k]; });
+  } catch (e) { /* storage blocked or bad JSON */ }
+  const canNotify = 'Notification' in window && window.isSecureContext;
+  let notifyNote = '', bridgeFocus = false, shown = null;
+  const showTabs = () => ui.setTabs(tabOpt, bridgeFocus && !!FOCUS_APP, canNotify, notifyNote);
+  // The app the bridge talks to (by its name on a Mac). Others, such as Firefox and Arc, can't be brought forward this way.
+  const FOCUS_APP = (() => {
+    const ua = navigator.userAgent, brands = ((navigator.userAgentData && navigator.userAgentData.brands) || []).map((b) => b.brand);
+    if (!/Macintosh/.test(ua)) return '';
+    if (isBrave) return 'Brave Browser';
+    if (brands.includes('Microsoft Edge')) return 'Microsoft Edge';
+    if (brands.includes('Google Chrome')) return 'Google Chrome';
+    if (!navigator.userAgentData && /Version\/[\d.]+ Safari\//.test(ua)) return 'Safari';
+    return '';
+  })();
+  const FOCUS_URL = cfg.endpoint.replace(/\/?$/, '/focus');
+  async function askToNotify() {
+    notifyNote = '';
+    let p = Notification.permission;
+    if (p === 'default') p = await Notification.requestPermission().catch(() => 'denied');
+    if (p !== 'granted') {
+      tabOpt.notify = false; store(TAB_KEY, JSON.stringify(tabOpt));
+      notifyNote = 'Notifications are blocked for this site. Allow them in the address bar’s site settings, then turn this on again.';
+    }
+    showTabs();
+  }
+  // A mark of zero-width characters, added to the title for the moment, so the bridge can tell this tab from others
+  // on the same page.
+  const makeMark = () => Array.from(crypto.getRandomValues(new Uint8Array(12)), (n) => '​‌‍⁠'[n & 3]).join('');
+  async function raiseTab() {
+    const mark = makeMark();
+    document.title += mark;
+    try {
+      const res = await fetch(FOCUS_URL, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ app: FOCUS_APP, url: location.href, mark }) });
+      const r = await res.json().catch(() => ({}));
+      if (!r.ok) console.warn('[voice-chat] bringing this tab forward:', r.error || res.status);
+      return !!r.ok;
+    } catch (e) { return false; } finally { document.title = document.title.split(mark).join(''); }
+  }
+  function notifyHere() {
+    if (!canNotify || Notification.permission !== 'granted') return;
+    try {
+      if (shown) shown.close();
+      const n = shown = new Notification(`${shownName()} is answering`, { body: document.title || location.pathname, tag: 'voice-chat', silent: true });
+      n.onclick = () => { window.focus(); n.close(); };
+      n.onclose = () => { if (shown === n) shown = null; };
+    } catch (e) { /* not allowed here */ }
+  }
+  async function lookHere() {
+    if (lookedHere) return;
+    lookedHere = true;
+    if (!document.hidden) return;
+    if (tabOpt.raise && bridgeFocus && FOCUS_APP && await raiseTab()) return;
+    if (tabOpt.notify) notifyHere();
+  }
+  showTabs();
+
+  // --- reporting this tab to the local bridge every 10 seconds, so http://localhost/ (desktop/localhost.mjs) can list the
+  // tabs using it in every browser, and turn the widget off in one of them: the bridge's reply then says to stop.
+  const PRESENCE_URL = cfg.endpoint.replace(/\/?$/, '/presence');
+  const BROWSER = isBrave ? 'Brave' : (() => {
+    const ua = navigator.userAgent;
+    return /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'Other';
+  })();
+  function reportTab(gone) {
+    const track = micStream && micStream.getAudioTracks()[0];
+    const body = new Blob([JSON.stringify(gone ? { id: tabId, gone: true } : {
+      id: tabId, url: location.href, title: document.title.replace(/[\u200b\u200c\u200d\u2060]/g, ''), browser: BROWSER, app: FOCUS_APP,
+      mic: track && track.readyState === 'live' ? track.label : '', state: elsewhere && mode === 'off' ? 'elsewhere' : mode,
+      paused: audioPaused || motionPaused || listenPaused, hidden: document.hidden, automated: !!navigator.webdriver,
+    })], { type: 'text/plain' });
+    if (gone) { try { navigator.sendBeacon(PRESENCE_URL, body); } catch (e) { /* closing */ } return; }
+    fetch(PRESENCE_URL, { method: 'POST', body }).then((r) => r.json()).then((r) => {
+      if (r && r.stop && mode !== 'off') { stop(); releaseMic(); ui.note('Voice was turned off in this tab from http://localhost/.', 10000); }
+    }).catch(() => { /* bridge not running */ });
+  }
+  if (viaBridge) {
+    setTimeout(reportTab, 1000);
+    setInterval(reportTab, 10000);
+    document.addEventListener('visibilitychange', () => reportTab());
+    window.addEventListener('pagehide', () => reportTab(true));
+  }
+
   // --- lifecycle
   async function start() {
     if (mode !== 'off' && mode !== 'error') return;
@@ -2979,6 +3169,7 @@
     }
     const mic = cfg.micLevel ? await startMicLevel() : true;
     if (mic === 'denied') { setMode('error'); ui.note('Microphone access was blocked. Allow it in the address bar, then tap the button. You can also type.', 12000); ui.showInput(); return; }
+    claimVoice();
     setMode('wake');
     if (wantBridgeStt() || !SR) listenVia(true); else startRecognition();
   }
@@ -2999,7 +3190,7 @@
 
   setMode('off');
   if (cfg.autostart && SR && navigator.permissions && navigator.permissions.query) {
-    navigator.permissions.query({ name: 'microphone' }).then((p) => { if (p.state === 'granted') start(); }).catch(() => {});
+    micGranted().then((ok) => { if (ok) autoStart(); });
   }
 
   window.VoiceChat = {
@@ -3030,6 +3221,8 @@
     get state() { return mode; },
     /** Whether listening is paused (the pause button), so a page's "I'm listening" can go. */
     get listenPaused() { return listenPaused; },
+    /** Whether voice is off here because another of the site's tabs turned it on. */
+    get elsewhere() { return elsewhere; },
     get history() { return history.slice(); },
     config: cfg,
     moods: Object.keys(MOODS),

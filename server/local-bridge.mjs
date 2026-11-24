@@ -9,10 +9,11 @@
 //   outside it. CLI_READ_FILES=false answers without files.
 // LOCAL_BACKEND=api answers through the Claude API with ANTHROPIC_API_KEY from .env.
 // POST .../transcribe turns speech into text for browsers whose own speech input is missing or fails (see TRANSCRIBE below).
+// POST .../focus brings the page's tab to the front of its browser, on a Mac (see FOCUS below).
 // No npm dependencies; needs Node 18+.
 
 import http from 'node:http';
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
 import { readFileSync, existsSync, statSync, createReadStream, mkdtempSync, readdirSync, writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import path from 'node:path';
@@ -310,13 +311,89 @@ function readBody(req, limit = 200_000, raw = false) {
   });
 }
 
+// ---------- focus: bringing the talking tab to the front ----------
+// A page can't bring its own tab or window to the front, so on a Mac the bridge does it with JavaScript for Automation
+// (osascript): the tab becomes its window's active tab, the window comes in front of the browser's others, and the
+// browser in front of other apps. The page sends its browser's app name, its URL and a mark of zero-width characters
+// it adds to its title for the moment, which tells apart two tabs on the same page; without the mark found, a tab whose
+// URL matches is used only when it's the only one. The first time, macOS asks whether the app that started the bridge
+// (Terminal, say) may control the browser (System Settings > Privacy & Security > Automation). FOCUS=false turns it off.
+const FOCUS = process.platform === 'darwin' && (process.env.FOCUS || 'true').toLowerCase() !== 'false';
+const FOCUS_APPS = ['Brave Browser', 'Google Chrome', 'Microsoft Edge', 'Chromium', 'Safari'];
+const FOCUS_JXA = `function run(argv) {
+  const [name, url, mark] = argv;
+  const app = Application(name);
+  if (!app.running()) return 'not running';
+  const safari = name === 'Safari';
+  let hit = null, byUrl = [];
+  for (const w of app.windows()) {
+    let titles, urls;
+    try { titles = safari ? w.tabs.name() : w.tabs.title(); urls = w.tabs.url(); } catch (e) { continue; }
+    for (let i = 0; i < urls.length; i++) {
+      if (mark && String(titles[i] || '').includes(mark)) { hit = { w, i }; break; }
+      if (urls[i] === url) byUrl.push({ w, i });
+    }
+    if (hit) break;
+  }
+  if (!hit && byUrl.length === 1) hit = byUrl[0];
+  if (!hit) return byUrl.length ? 'more than one tab with this URL' : 'no such tab';
+  if (safari) hit.w.currentTab = hit.w.tabs[hit.i]; else hit.w.activeTabIndex = hit.i + 1;
+  try { if (safari ? hit.w.miniaturized() : hit.w.minimized()) { if (safari) hit.w.miniaturized = false; else hit.w.minimized = false; } } catch (e) { /* not reported */ }
+  hit.w.index = 1;
+  app.activate();
+  return 'ok';
+}`;
+function focusTab(app, url, mark) {
+  return new Promise((resolve) => {
+    execFile('osascript', ['-l', 'JavaScript', '-e', FOCUS_JXA, app, url, mark], { timeout: 5000 }, (err, out, errOut) => {
+      if (err) return resolve(/-1743|not allowed|Not authorized/i.test(String(errOut) + err.message)
+        ? `not allowed to control ${app} (System Settings > Privacy & Security > Automation)` : String(errOut || err.message).trim().split('\n').pop());
+      resolve(String(out).trim());
+    });
+  });
+}
+
+// ---------- tabs: which browser tabs use the bridge ----------
+// Each page with the widget reports itself every 15 seconds (POST .../presence, sent as text/plain so it needs no
+// preflight): its tab id, URL, title, browser, state and microphone. GET .../tabs lists them for the localhost page
+// (desktop/localhost.mjs), with recent questions and recordings from pages that don't report themselves, such as a tab
+// still running an older copy of the widget. POST .../tabs/stop { id } turns the widget off in that tab at its next report.
+const TAB_SEEN_MS = 45000, OTHER_SEEN_MS = 10 * 60 * 1000;
+const tabs = new Map(), stopTabs = new Set(), others = new Map();
+const clip = (v, n) => String(v == null ? '' : v).slice(0, n);
+function browserOf(req) {
+  const brands = String(req.headers['sec-ch-ua'] || ''), ua = String(req.headers['user-agent'] || '');
+  if (/Brave/.test(brands)) return 'Brave';
+  if (/Microsoft Edge/.test(brands) || /Edg\//.test(ua)) return 'Edge';
+  if (/Google Chrome/.test(brands)) return 'Chrome';
+  if (/Firefox\//.test(ua)) return 'Firefox';
+  if (/Version\/[\d.]+ Safari\//.test(ua)) return 'Safari';
+  return /Chrom/.test(brands + ua) ? 'Chromium' : 'Other';
+}
+function noteRequest(req, kind, page, tab) {
+  if (tab && tabs.has(tab)) { tabs.get(tab).lastUse = Date.now(); return; }
+  if (!req.headers.origin) return;
+  const browser = browserOf(req), key = `${req.headers.origin} ${browser}`;
+  const o = others.get(key) || { origin: req.headers.origin, browser, count: 0, first: Date.now() };
+  Object.assign(o, { last: Date.now(), kind, page: page || o.page || '' });
+  o.count++;
+  others.set(key, o);
+}
+function listTabs() {
+  const now = Date.now();
+  for (const [id, t] of tabs) if (now - t.last > TAB_SEEN_MS) { tabs.delete(id); stopTabs.delete(id); }
+  for (const [key, o] of others) if (now - o.last > OTHER_SEEN_MS) others.delete(key);
+  return { now, tabs: [...tabs.values()], unreported: [...others.values()] };
+}
+
 const server = http.createServer(async (req, res) => {
   const origin = req.headers.origin;
   const url = new URL(req.url, 'http://x');
 
-  if (url.pathname === API_PATH || ['/health', '/status', '/transcribe'].some((p) => url.pathname === API_PATH + p)) {
+  if (url.pathname === API_PATH || ['/health', '/status', '/transcribe', '/focus', '/presence', '/tabs', '/tabs/stop'].some((p) => url.pathname === API_PATH + p)) {
     if (!originAllowed(origin)) { res.writeHead(403); return res.end('Origin not allowed'); }
     const cors = origin ? { 'access-control-allow-origin': origin, vary: 'Origin' } : {};
+    const reply = (code, obj) => { res.writeHead(code, { ...cors, 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(obj)); };
     if (req.method === 'OPTIONS') {
       res.writeHead(204, { ...cors, 'access-control-allow-methods': 'POST, GET, OPTIONS', 'access-control-allow-headers': 'content-type, x-team-passphrase', 'access-control-max-age': '600' });
       return res.end();
@@ -325,13 +402,46 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { ...cors, 'content-type': 'application/json' });
       return res.end(JSON.stringify({ ok: true, backend: BACKEND, model: MODEL }));
     }
+    if (url.pathname.endsWith('/tabs') && req.method === 'GET') return reply(200, listTabs());
+    if (url.pathname.endsWith('/presence') && req.method === 'POST') {
+      let b;
+      try { b = JSON.parse(await readBody(req, 8000)); } catch { b = null; }
+      if (!b || typeof b.id !== 'string' || !/^[a-z0-9]{4,20}$/.test(b.id)) return reply(400, { ok: false, error: 'Bad request' });
+      if (b.gone) { tabs.delete(b.id); stopTabs.delete(b.id); return reply(200, { ok: true }); }
+      const prev = tabs.get(b.id);
+      tabs.set(b.id, {
+        id: b.id, url: clip(b.url, 500), title: clip(b.title, 200), browser: clip(b.browser, 40) || browserOf(req), app: clip(b.app, 40),
+        mic: clip(b.mic, 120), state: clip(b.state, 20), paused: !!b.paused, hidden: !!b.hidden, automated: !!b.automated,
+        first: prev ? prev.first : Date.now(), last: Date.now(), lastUse: prev ? prev.lastUse : 0,
+      });
+      return reply(200, { ok: true, stop: stopTabs.delete(b.id) });
+    }
+    if (url.pathname.endsWith('/tabs/stop') && req.method === 'POST') {
+      let b;
+      try { b = JSON.parse(await readBody(req, 2000)); } catch { b = null; }
+      if (!b || !tabs.has(b.id)) return reply(404, { ok: false, error: 'No such tab. It may have closed.' });
+      stopTabs.add(b.id);
+      return reply(200, { ok: true });
+    }
     // What's answering, what's running now (each until its process has exited) and how the last request went.
     if (url.pathname.endsWith('/status')) {
       res.writeHead(200, { ...cors, 'content-type': 'application/json', 'cache-control': 'no-store' });
       const now = Date.now();
-      return res.end(JSON.stringify({ agent: AGENT, running: [...running.values()].map((r) => ({ ...r, seconds: Math.round((now - r.started) / 1000) })), last: lastRun, transcribe: shownTranscriber() }));
+      return res.end(JSON.stringify({ agent: AGENT, running: [...running.values()].map((r) => ({ ...r, seconds: Math.round((now - r.started) / 1000) })), last: lastRun, transcribe: shownTranscriber(), focus: FOCUS }));
     }
     if (req.method !== 'POST') { res.writeHead(405, cors); return res.end(); }
+
+    // Bringing the page's tab to the front: { app, url, mark } in, { ok } or { ok: false, error } out.
+    if (url.pathname.endsWith('/focus')) {
+      const reply = (code, obj) => { res.writeHead(code, { ...cors, 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(obj)); };
+      if (!FOCUS) return reply(501, { ok: false, error: process.platform === 'darwin' ? 'Turned off (FOCUS=false).' : 'Only on a Mac.' });
+      let b;
+      try { b = JSON.parse(await readBody(req, 4000)); } catch { b = null; }
+      if (!b || !FOCUS_APPS.includes(b.app) || typeof b.url !== 'string' || !/^https?:\/\//.test(b.url) || (b.mark && !/^[\u200b\u200c\u200d\u2060]{6,32}$/.test(b.mark))) return reply(400, { ok: false, error: 'Bad request' });
+      const out = await focusTab(b.app, b.url, b.mark || '');
+      if (out !== 'ok') log(`focus: ${out} (${b.app})`);
+      return reply(200, out === 'ok' ? { ok: true } : { ok: false, error: out });
+    }
 
     // Speech to text: a WAV in, { text } out (or { error }). ?lang= is the page's language (en-US), sent as its first part.
     if (url.pathname.endsWith('/transcribe')) {
@@ -341,6 +451,7 @@ const server = http.createServer(async (req, res) => {
       try { wav = await readBody(req, 8_000_000, true); } catch { return reply(413, { error: 'The recording is too long.' }); }
       if (wav.length < 44 || wav.toString('ascii', 0, 4) !== 'RIFF') return reply(400, { error: 'Expected a WAV recording.' });
       const lang = (url.searchParams.get('lang') || '').split('-')[0].toLowerCase().replace(/[^a-z]/g, '');
+      noteRequest(req, 'speech to text', '', url.searchParams.get('tab'));
       const ac = new AbortController();
       res.on('close', () => { if (!res.writableEnded) ac.abort(); });
       const started = Date.now();
@@ -354,9 +465,10 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    let messages, output, page;
-    try { ({ messages, output, page } = JSON.parse(await readBody(req))); messages = sanitizeMessages(messages); } catch { messages = null; }
+    let messages, output, page, tab;
+    try { ({ messages, output, page, tab } = JSON.parse(await readBody(req))); messages = sanitizeMessages(messages); } catch { messages = null; }
     if (!messages) { res.writeHead(400, { ...cors, 'content-type': 'application/json' }); return res.end('{"error":"Bad request"}'); }
+    noteRequest(req, 'question', typeof page === 'string' ? page.slice(0, 300) : '', tab);
 
     res.writeHead(200, { ...cors, 'content-type': 'application/x-ndjson; charset=utf-8', 'cache-control': 'no-store', 'x-accel-buffering': 'no' });
     const ac = new AbortController();
@@ -413,6 +525,7 @@ server.listen(PORT, HOST, () => {
   if (SERVE_ROOT) log(`serving ${SERVE_ROOT} at http://localhost:${PORT}/`);
   if (BACKEND === 'cli') log(`CLI: ${CLI} (run "claude" once and log in if you have not)`);
   if (BACKEND === 'cli') log(READ_FILES ? `CLI files: reads ${WEBROOT}, read-only (CLI_READ_FILES=false to turn off)` : 'CLI files: none');
+  log(FOCUS ? `focus: brings the talking tab to the front (${API_PATH}/focus; FOCUS=false to turn off)` : 'focus: off');
   TRANSCRIBER = pickTranscriber();
   log(TRANSCRIBER ? `speech to text: ${TRANSCRIBER.name} (${TRANSCRIBER.model}) at ${API_PATH}/transcribe`
     : 'speech to text: none, so browsers without their own speech input type instead (see TRANSCRIBE in this file)');
