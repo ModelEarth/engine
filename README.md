@@ -1,4 +1,4 @@
-# claude-voice
+# voice-chat
 
 Talk to Claude Opus 5.5 by voice from a static page.
 
@@ -8,12 +8,12 @@ Talk to Claude Opus 5.5 by voice from a static page.
 
 ```
 engine/                        ← this submodule, inside your webroot
-  claude-voice.js              ← the only file the page loads
+  js/voice-chat.js             ← the only file the page loads
   demo.html
   shared/                      ← system prompt + Claude API streaming (used by both servers)
   server/local-bridge.mjs      ← localhost: Claude Code CLI (or API) bridge
   server/push-secrets.mjs      ← copies keys from .env to Cloudflare secrets
-  worker/claude-voice-api.js   ← Cloudflare Worker endpoint
+  worker/voice-chat-api.js     ← Cloudflare Worker endpoint
   worker/wrangler.example.jsonc
   .env.example
   assetsignore.example
@@ -23,15 +23,15 @@ engine/                        ← this submodule, inside your webroot
 
 ```html
 <div id="stage"> …your content… </div>
-<script src="/engine/claude-voice.js" data-target="#stage" defer></script>
+<script src="/engine/js/voice-chat.js" data-target="#stage" defer></script>
 ```
 
 The script never holds a key. It decides where to send requests based on where the page is running:
 
 | Page served from | Requests go to | Answered by |
 |---|---|---|
-| `localhost` / `127.0.0.1` (any port) | `http://127.0.0.1:3703/api/claude-voice` | Local bridge, using the **Claude Code CLI** |
-| Anywhere else (Cloudflare) | `/api/claude-voice` on the same site | Worker, using the **Claude API** key |
+| `localhost` / `127.0.0.1` (any port) | `http://127.0.0.1:3703/api/voice-chat` | Local bridge, using the **Claude Code CLI** |
+| Anywhere else (Cloudflare) | `/api/voice-chat` on the same site | Worker, using the **Claude API** key |
 
 The same rule covers `wrangler dev`: on `localhost:8787` the page still uses the CLI bridge. You can override the endpoint with `data-endpoint`.
 
@@ -42,6 +42,7 @@ The same rule covers `wrangler dev`: on `localhost:8787` the page still uses the
 - `data-bridge-port`: bridge port. Default `3703`.
 - `data-lang`: speech language. Default: the page's `lang`, otherwise `en-US`.
 - `data-voice`: part of a voice name, for example `Samantha` or `Google UK English Female`.
+- `data-voice-mode`: `chosen`, `random` or `response` (see "Which voice speaks" below). Default: `chosen` when `data-voice` is set, otherwise `response`. The ⚙ panel's choice overrides both and is remembered in that browser.
 - `data-ui`: `full` (status pill and captions), `minimal` (pill only) or `none`.
 - `data-idle-timeout`: seconds of silence before a conversation closes itself. Default `120`.
 - `data-autostart="false"`: always wait for a click before starting.
@@ -51,10 +52,12 @@ The script also exposes the palette as CSS variables on the target: `--cv-c1`, `
 
 ## Keys: `.env`
 
-Copy `.env.example` to `../../safe/cloudroot.env`, relative to this submodule (the same file `automation/paths.yaml` names), so it sits outside the webroot. The bridge reads:
+Copy `.env.example` to the env file that `automation/paths.yaml` names in the webroot above this submodule (`env_file:`, relative to the automation folder), the same file the site's other scripts use. Keep it outside the webroot. The bridge and `push-secrets.mjs` read:
 
-1. `$CLAUDE_VOICE_ENV`, if set
-2. otherwise `../../safe/cloudroot.env`
+1. `$VOICE_CHAT_ENV`, if set in the shell (optional, for a different env file)
+2. otherwise the file `env_file:` names in `automation/paths.yaml`
+
+`push-secrets.mjs` also takes the path as its first argument, ahead of both.
 
 It prints a warning if the `.env` it finds is inside the webroot. A `.env` in the webroot can be served by other static servers or uploaded by `wrangler deploy`. If you must keep it there, copy `assetsignore.example` to `<webroot>/.assetsignore`.
 
@@ -77,7 +80,7 @@ How the bridge runs each turn:
 
 ### Speech to text for browsers without working speech input
 
-Brave, Firefox and iOS browsers other than Safari have no speech input, and Chrome's sometimes hears nothing. For these, the widget can record what you say and send it to the bridge, which turns it into text. Each turn ends at a pause and goes to `POST /api/claude-voice/transcribe` as a 16 kHz WAV. The text then goes to `claude -p` like any spoken turn.
+Brave, Firefox and iOS browsers other than Safari have no speech input, and Chrome's sometimes hears nothing. For these, the widget can record what you say and send it to the bridge, which turns it into text. Each turn ends at a pause and goes to `POST /api/voice-chat/transcribe` as a 16 kHz WAV. The text then goes to `claude -p` like any spoken turn.
 
 - **Automatic (default):** the widget uses the browser's own speech input. It switches to the bridge when that's missing or fails: "service-not-allowed", repeated "network" errors, or two consecutive "no-speech" errors during a conversation. With local transcription, two "no-speech" errors while waiting for the wake phrase also switch to the bridge. A successful browser result resets the silence count. Speech to Text in the settings panel's Listening section can also be set to Browser or Bridge.
 - **When it listens:** not while Claude speaks or thinks. To start, you say "Ok Claude" when the transcriber runs on this computer. With a cloud service, a tap starts the conversation instead, so audio isn't sent to the cloud all the time.
@@ -92,7 +95,7 @@ The bridge picks a transcriber when it starts (`TRANSCRIBE=auto`), and its log s
 - **A cloud service:** an OpenAI-compatible `/audio/transcriptions` endpoint, used when there's no whisper.cpp. It needs `OPENAI_API_KEY`, or `TRANSCRIBE_API_KEY` with `TRANSCRIBE_URL` for another service such as Groq. `TRANSCRIBE_MODEL` defaults to `gpt-4o-mini-transcribe`.
 - `TRANSCRIBE=whisper`, `cloud` or `off` forces one choice.
 
-**On the deployed site,** the Worker does the same with Whisper on Cloudflare's Workers AI (`@cf/openai/whisper-large-v3-turbo`), through an AI binding in the wrangler config (`[ai] binding = "AI"`, or `"ai": { "binding": "AI" }`). `GET /api/claude-voice/status` tells the page it's there, and `POST /api/claude-voice/transcribe` takes each turn. As with a conversation, it needs the team passphrase when one is set (the page asks for it), or the visitor's own key from the Keys page. A tap starts the conversation, since the audio goes to Cloudflare. Without the binding, the widget falls back to the browser's speech input or typing.
+**On the deployed site,** the Worker does the same with Whisper on Cloudflare's Workers AI (`@cf/openai/whisper-large-v3-turbo`), through an AI binding in the wrangler config (`[ai] binding = "AI"`, or `"ai": { "binding": "AI" }`). `GET /api/voice-chat/status` tells the page it's there, and `POST /api/voice-chat/transcribe` takes each turn. As with a conversation, it needs the team passphrase when one is set (the page asks for it), or the visitor's own key from the Keys page. A tap starts the conversation, since the audio goes to Cloudflare. Without the binding, the widget falls back to the browser's speech input or typing.
 
 `wrangler dev` reaches an AI binding only on Cloudflare itself, which needs a login, so CloudRoot's `npm run dev` runs it with `--local` (binding off). Locally, the bridge transcribes instead.
 
@@ -101,8 +104,8 @@ The bridge picks a transcriber when it starts (`TRANSCRIBE=auto`), and its log s
 1. Copy `worker/wrangler.example.jsonc` to the folder above your webroot as `wrangler.jsonc`, and adjust the paths.
    - If you already have a Worker, import the handler instead:
      ```js
-     import { handleClaudeVoice, CLAUDE_VOICE_PATH } from './public/engine/worker/claude-voice-api.js';
-     // in fetch(): if (new URL(request.url).pathname === CLAUDE_VOICE_PATH) return handleClaudeVoice(request, env, ctx);
+     import { handleVoiceChat, VOICE_CHAT_PATH } from './public/engine/worker/voice-chat-api.js';
+     // in fetch(): if (new URL(request.url).pathname === VOICE_CHAT_PATH) return handleVoiceChat(request, env, ctx);
      ```
 2. Push the key from `.env`: `node public/engine/server/push-secrets.mjs`. This sets the `ANTHROPIC_API_KEY` secret and, if present, `ALLOWED_ORIGINS`.
 3. Deploy: `npx wrangler deploy`.
@@ -138,9 +141,34 @@ The script strips the header before speaking, and the visuals change before the 
 
 **Reduced motion.** `prefers-reduced-motion` slows everything down and removes the flashes.
 
+## Which voice speaks
+
+Replies are spoken with the browser's own text to speech (`speechSynthesis`). There's no SDK and no server voice. The voices are whatever that browser and OS have installed, so they differ from one browser to the next: Edge has Microsoft's online voices, such as "Microsoft Ava Online (Natural)", Chrome has "Google US English" and Safari has Apple's, such as "Samantha" or "Ava (Premium)". Your own speech has no effect on which voice is used.
+
+**Ranking.** Browsers don't rate their voices, so the widget ranks the English ones by name (`voiceTier` and `rankVoices` in `js/voice-chat.js`):
+
+| Tier | Voice name | Example |
+|---|---|---|
+| Best | contains "natural", "neural" or "premium" | Microsoft Ava Online (Natural) |
+| Very good | contains "enhanced", or starts with "Google " | Google UK English Female |
+| Standard | anything else | Samantha |
+| Robotic | old Mac voices such as Fred, Ralph, Albert and Grandma | Fred |
+| Novelty | Bubbles, Bells, Jester, Zarvox and the like | Zarvox |
+
+Within a tier, a favourites list (Ava, Andrew, Emma, Brian, Jenny and others) comes first, then US English, then UK English, then other English voices.
+
+**Voice modes.** The ⚙ panel's voice setting, or `data-voice-mode`, chooses from that ranked list:
+
+- **Chosen voice** (`chosen`): one voice you pick, which never changes.
+- **Random voice** (`random`): a different top-ranked voice for each new conversation.
+- **Change for response** (`response`, the default): a voice suited to each reply. Claude's hidden header for the reply also names a delivery style: `warm`, `bright`, `calm`, `authoritative`, `playful` or `storyteller` (`VOICE_STYLES` in `shared/voice-prompt.js`). The widget picks an installed voice that suits it (`VOICE_STYLES` in `js/voice-chat.js`). For example, `authoritative` prefers Andrew, Brian or Guy, and `playful` prefers Zoe, Aria or Allison. When none of those voices is installed, it uses the best-ranked voice it has, and it avoids repeating the voice just used.
+
+So the voice can change from one reply to the next, following the tone Claude chose for its answer.
+
 ## Browser notes
 
 - Voice input uses the Web Speech API in Chrome, Edge and Safari. Brave and Firefox, which lack it, record what you say and have the bridge or the Worker turn it into text (see "Speech to text" above); without either, they get a text box. The ⌨ button opens it in any browser.
 - Browsers only allow speech output after a click or keypress on the page. Tap **Enable voice** once per visit; after that the wake phrase works hands-free. If the mic is already allowed, listening starts by itself.
-- While Claude is talking, the script only listens for "Thanks". Press Esc or tap the pill to interrupt.
+- You can talk while Claude is talking. **Hear Me While Claude Speaks**, in the ⚙ panel's Listening settings and on by default, keeps the mic on while Claude speaks. The mic also hears Claude through the speakers, so runs of the words Claude just spoke are taken out of what it hears, and only your own words are kept. They're sent as your next turn once you stop and Claude finishes its sentences. "Thanks" ends the conversation, and the wake phrase ("Ok Claude") interrupts Claude, with anything said after it sent at once. With the setting off, the mic is off while Claude speaks and comes back after **Mic Back After Claude** (0.7 s by default). Press Esc or tap the pill to interrupt at any time.
+- Hear Me While Claude Speaks applies to the browser's own speech input. When speech to text goes through Whisper (Brave, Firefox, or Bridge chosen under Speech to Text), the mic doesn't record while Claude speaks or for a moment after, since Claude's voice isn't taken out of a recording. The setting is then greyed out in the ⚙ panel, with a note saying why. On the deployed site, Whisper runs on the site's Cloudflare Workers AI quota with the team passphrase: 10,000 neurons a day free, about 3.5 hours of audio at roughly 47 neurons a minute, then $0.011 per 1,000 neurons on Cloudflare's paid Workers plan. On the free plan, transcription stops until the daily reset at 00:00 UTC. That's billed by Cloudflare, apart from the Claude API usage that Anthropic bills for the replies. Listening over Claude would send Claude's voice to Whisper too, which is another reason it stays off there.
 - Chrome's recognition uses Google's servers, so the page must be on `https` or `localhost`.

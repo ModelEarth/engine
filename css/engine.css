@@ -1,4 +1,4 @@
-/* Shared layout for pages with the voice widget (engine/claude-voice.js) in a #fullscreen div,
+/* Shared layout for pages with the voice widget (engine/js/voice-chat.js) in a #fullscreen div,
    such as project/goals and project/care. Load it after localsite/css/base.css and before the
    page's own CSS, which can override it. */
 

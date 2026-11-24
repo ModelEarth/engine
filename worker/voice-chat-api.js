@@ -1,16 +1,16 @@
-// Cloudflare Worker endpoint for claude-voice.js (production / wrangler deploy).
+// Cloudflare Worker endpoint for voice-chat.js (production / wrangler deploy).
 //
-// Use it standalone (this file's default export serves /api/claude-voice and falls back
-// to your static assets), or import { handleClaudeVoice } into your existing Worker:
+// Use it standalone (this file's default export serves /api/voice-chat and falls back
+// to your static assets), or import { handleVoiceChat } into your existing Worker:
 //
-//   import { handleClaudeVoice, CLAUDE_VOICE_PATH } from './engine/worker/claude-voice-api.js';
-//   if (new URL(request.url).pathname === CLAUDE_VOICE_PATH) return handleClaudeVoice(request, env, ctx);
+//   import { handleVoiceChat, VOICE_CHAT_PATH } from './engine/worker/voice-chat-api.js';
+//   if (new URL(request.url).pathname === VOICE_CHAT_PATH) return handleVoiceChat(request, env, ctx);
 //
 // Secrets/vars (push from .env with: node engine/server/push-secrets.mjs):
 //   ANTHROPIC_API_KEY  (secret) Claude answers first
 //   GEMINI_API_KEY     (secret) Gemini answers when Claude can't (no key, invalid key, no credits, busy).
 //                      Why one was skipped shows on the page as a note. When both fail, the error is marked
-//                      keys: true, and claude-voice.js tries the visitor's own key from the /keys page (Claude,
+//                      keys: true, and voice-chat.js tries the visitor's own key from the /keys page (Claude,
 //                      Gemini, OpenAI, xAI, Groq, Perplexity or Pollinations; OWN_PROVIDERS below), sent in the
 //                      x-provider-name / x-provider-key headers. A request with the visitor's own
 //                      key uses only that key and needs no TEAM_PASSPHRASE, since the site's keys aren't spent.
@@ -22,12 +22,12 @@
 //                      each spoken turn (a 16 kHz WAV) into text with Whisper (TRANSCRIBE_MODEL), as the local bridge does
 //                      with whisper.cpp. Bind it in wrangler: [ai] binding = "AI" (wrangler.toml) or "ai": { "binding": "AI" }.
 //                      Like a conversation, it needs the team passphrase when one is set, or the visitor's own key.
-//   TEAM_PASSPHRASE    (secret, optional): when set, each request needs it (shared/passphrase.js). claude-voice.js
+//   TEAM_PASSPHRASE    (secret, optional): when set, each request needs it (shared/passphrase.js). voice-chat.js
 //                      asks for it on a 401 and trades it at /api/team-passphrase for a cookie page scripts can't
 //                      read (handleTeamPassphrase there), so only people given it use the key.
-//                      handleClaudeVoice(..., { passphrase: true }) requires one to be set.
+//                      handleVoiceChat(..., { passphrase: true }) requires one to be set.
 //
-// handleClaudeVoice(..., { tools: (env, { origin, page }) => toolkit }) gives Claude tools of its own, such as reading
+// handleVoiceChat(..., { tools: (env, { origin, page }) => toolkit }) gives Claude tools of its own, such as reading
 // the site's code (CloudRoot's worker/src/site-code.js reads it from GitHub, where the local bridge reads files). Only
 // for requests with the team passphrase, since tools can spend the site's tokens: the site's keys, or a visitor's own
 // Claude key sent with the passphrase. toolkit: { definitions, run(name, input), target(name, input), prompt (added to
@@ -39,9 +39,9 @@ import { GEMINI_DEFAULT_MODEL, streamGemini } from '../shared/gemini.js';
 import { streamOpenAICompat } from '../shared/openai-compat.js';
 import { PASSPHRASE_HEADER, passphraseRefusal } from '../shared/passphrase.js';
 
-export const CLAUDE_VOICE_PATH = '/api/claude-voice';
-// The conversation at CLAUDE_VOICE_PATH, plus .../status and .../transcribe under it
-export const isClaudeVoicePath = (path) => path === CLAUDE_VOICE_PATH || path.startsWith(CLAUDE_VOICE_PATH + '/');
+export const VOICE_CHAT_PATH = '/api/voice-chat';
+// The conversation at VOICE_CHAT_PATH, plus .../status and .../transcribe under it
+export const isVoiceChatPath = (path) => path === VOICE_CHAT_PATH || path.startsWith(VOICE_CHAT_PATH + '/');
 const TRANSCRIBE_MODEL = '@cf/openai/whisper-large-v3-turbo';
 const TRANSCRIBE_MAX_BYTES = 4_000_000; // A turn is at most 30 seconds, about 1 MB as a 16 kHz WAV
 // The /keys page's provider ids (keys/providers.js) this endpoint can answer with, given the visitor's own key: name
@@ -69,7 +69,7 @@ function corsHeaders(request, env) {
   return { ok: false, headers: {} };
 }
 
-// .../status: what this Worker offers the page (claude-voice.js checkAgent). worker: true, since it has no view of
+// .../status: what this Worker offers the page (voice-chat.js checkAgent). worker: true, since it has no view of
 // running replies as the local bridge does.
 function voiceStatus(env, cors) {
   const transcribe = env.AI ? { name: 'Whisper on Cloudflare', model: TRANSCRIBE_MODEL.split('/').pop(), local: false } : null;
@@ -85,8 +85,8 @@ async function voiceTranscribe(request, env, cors, required) {
     const refusal = await passphraseRefusal(request, env, { required, to: 'talk' });
     if (refusal) return Response.json({ error: refusal.error, passphrase: refusal.passphrase }, { status: refusal.status, headers: cors });
   }
-  if (env.CLAUDE_VOICE_LIMITER) {
-    const { success } = await env.CLAUDE_VOICE_LIMITER.limit({ key: request.headers.get('cf-connecting-ip') || 'anon' });
+  if (env.VOICE_CHAT_LIMITER) {
+    const { success } = await env.VOICE_CHAT_LIMITER.limit({ key: request.headers.get('cf-connecting-ip') || 'anon' });
     if (!success) return Response.json({ error: 'Too many requests' }, { status: 429, headers: cors });
   }
   const wav = new Uint8Array(await request.arrayBuffer());
@@ -104,13 +104,13 @@ async function voiceTranscribe(request, env, cors, required) {
   }
 }
 
-export async function handleClaudeVoice(request, env, ctx, { passphrase: required = false, tools = null } = {}) {
+export async function handleVoiceChat(request, env, ctx, { passphrase: required = false, tools = null } = {}) {
   const { ok, headers: cors } = corsHeaders(request, env);
   if (!ok) return new Response('Origin not allowed', { status: 403 });
   const path = new URL(request.url).pathname;
-  if (path === CLAUDE_VOICE_PATH + '/status' && request.method === 'GET') return voiceStatus(env, cors);
-  if (path === CLAUDE_VOICE_PATH + '/transcribe' && request.method === 'POST') return voiceTranscribe(request, env, cors, required);
-  if (path !== CLAUDE_VOICE_PATH && request.method !== 'OPTIONS') return Response.json({ error: 'Not found' }, { status: 404, headers: cors });
+  if (path === VOICE_CHAT_PATH + '/status' && request.method === 'GET') return voiceStatus(env, cors);
+  if (path === VOICE_CHAT_PATH + '/transcribe' && request.method === 'POST') return voiceTranscribe(request, env, cors, required);
+  if (path !== VOICE_CHAT_PATH && request.method !== 'OPTIONS') return Response.json({ error: 'Not found' }, { status: 404, headers: cors });
 
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: { ...cors, 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-headers': `content-type, ${PASSPHRASE_HEADER}, x-provider-name, x-provider-key`, 'access-control-max-age': '600' } });
@@ -128,10 +128,10 @@ export async function handleClaudeVoice(request, env, ctx, { passphrase: require
     if (refusal) return Response.json({ error: refusal.error, passphrase: refusal.passphrase }, { status: refusal.status, headers: cors });
   }
 
-  // Optional: bind a Cloudflare rate limiter named CLAUDE_VOICE_LIMITER in wrangler config.
-  if (env.CLAUDE_VOICE_LIMITER) {
+  // Optional: bind a Cloudflare rate limiter named VOICE_CHAT_LIMITER in wrangler config.
+  if (env.VOICE_CHAT_LIMITER) {
     const ip = request.headers.get('cf-connecting-ip') || 'anon';
-    const { success } = await env.CLAUDE_VOICE_LIMITER.limit({ key: ip });
+    const { success } = await env.VOICE_CHAT_LIMITER.limit({ key: ip });
     if (!success) return Response.json({ error: 'Too many requests' }, { status: 429, headers: cors });
   }
 
@@ -208,7 +208,7 @@ export async function handleClaudeVoice(request, env, ctx, { passphrase: require
 
 export default {
   async fetch(request, env, ctx) {
-    if (isClaudeVoicePath(new URL(request.url).pathname)) return handleClaudeVoice(request, env, ctx);
+    if (isVoiceChatPath(new URL(request.url).pathname)) return handleVoiceChat(request, env, ctx);
     if (env.ASSETS) return env.ASSETS.fetch(request);
     return new Response('Not found', { status: 404 });
   },

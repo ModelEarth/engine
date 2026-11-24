@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Local bridge for claude-voice.js — run on your machine while developing on localhost.
+// Local bridge for voice-chat.js — run on your machine while developing on localhost.
 //
-//   node server/local-bridge.mjs                 # API endpoint only (http://localhost:3703/api/claude-voice)
+//   node server/local-bridge.mjs                 # API endpoint only (http://localhost:3703/api/voice-chat)
 //   node server/local-bridge.mjs --serve ../     # also serve your webroot at http://localhost:3703/
 //
 // LOCAL_BACKEND=cli (default) answers through the Claude Code CLI using your logged-in Claude account. It can read the
@@ -38,9 +38,16 @@ function loadEnv(file) {
   }
   return true;
 }
-// $CLAUDE_VOICE_ENV, else ../../safe/cloudroot.env (relative to this submodule, as in automation/paths.yaml).
-const envFile = process.env.CLAUDE_VOICE_ENV || path.resolve(ROOT, '..', '..', 'safe', 'cloudroot.env');
-const envLoaded = loadEnv(envFile);
+// The env file named by env_file: in automation/paths.yaml, in the webroot above this submodule (relative to that
+// automation folder), as the site's other scripts use it. $VOICE_CHAT_ENV, when set, names another file instead.
+function pathsYamlEnv(webroot) {
+  const yaml = path.join(webroot, 'automation', 'paths.yaml');
+  if (!existsSync(yaml)) return null;
+  const m = readFileSync(yaml, 'utf8').match(/^env_file:\s*["']?([^"'#\n]+?)["']?\s*(#.*)?$/m);
+  return m ? path.resolve(webroot, 'automation', m[1].trim()) : null;
+}
+const envFile = process.env.VOICE_CHAT_ENV || pathsYamlEnv(path.resolve(ROOT, '..'));
+const envLoaded = !!envFile && loadEnv(envFile);
 
 const args = process.argv.slice(2);
 const serveIdx = args.indexOf('--serve');
@@ -52,7 +59,7 @@ const MODEL = process.env.CLAUDE_MODEL || DEFAULT_MODEL;
 const BACKEND = (process.env.LOCAL_BACKEND || 'cli').toLowerCase();
 const CLI = process.env.CLAUDE_CLI_PATH || 'claude';
 const CLI_TIMEOUT_MS = Number(process.env.CLI_TIMEOUT_MS || 120000);
-const API_PATH = '/api/claude-voice';
+const API_PATH = '/api/voice-chat';
 
 // Only pages on localhost may call the bridge (plus anything listed in LOCAL_ALLOWED_ORIGINS).
 const extraOrigins = (process.env.LOCAL_ALLOWED_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -66,7 +73,7 @@ function originAllowed(origin) {
 }
 
 // ---------- backends ----------
-const cliWorkDir = mkdtempSync(path.join(tmpdir(), 'claude-voice-')); // empty dir: no CLAUDE.md, no project files
+const cliWorkDir = mkdtempSync(path.join(tmpdir(), 'voice-chat-')); // empty dir: no CLAUDE.md, no project files
 
 // File access for the CLI: the webroot (this submodule's parent folder), read-only.
 // - Only the Read, Glob and Grep tools exist in its sessions, so nothing can be written, edited or run.
@@ -77,7 +84,7 @@ const WEBROOT = path.resolve(ROOT, '..');
 const READ_FILES = process.env.CLI_READ_FILES !== 'false';
 const SECRET_FILES = ['**/.env', '**/.env.*', '**/.envrc', '**/.dev.vars', '**/*.pem', '**/*.key'];
 const CLI_SETTINGS = JSON.stringify({ permissions: { allow: [`Read(/${WEBROOT}/**)`], deny: SECRET_FILES.map((p) => `Read(${p})`) } });
-// quiet: the page hides its conversation text (Text Output in claude-voice.js), so Claude looks first and says only the answer.
+// quiet: the page hides its conversation text (Text Output in voice-chat.js), so Claude looks first and says only the answer.
 // page: the path of the page the person is on, whose own files are where a question about it starts.
 const filesPrompt = (quiet, page) => `
 
@@ -199,7 +206,7 @@ function askApi(messages, system, onText, signal, output, onInfo = () => {}) {
 
 // ---------- speech to text ----------
 // For a browser whose own speech input is missing (Brave, Firefox, iOS browsers other than Safari) or isn't working:
-// claude-voice.js records what's said, a turn at a time, and posts it to .../transcribe as a 16 kHz mono WAV. The text
+// voice-chat.js records what's said, a turn at a time, and posts it to .../transcribe as a 16 kHz mono WAV. The text
 // comes back as { text } and the page sends it on as a spoken turn. TRANSCRIBE picks how:
 //   auto (default)  whisper.cpp when it's set up, else a cloud service when it has a key, else none (the page then types)
 //   whisper         whisper.cpp on this computer: WHISPER_CLI (default whisper-cli, as Homebrew's whisper-cpp installs it)
@@ -387,17 +394,18 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.on('error', (err) => {
-  if (err.code === 'EADDRINUSE') console.error(`[claude-voice] Port ${PORT} is busy. Is the bridge already running? Set BRIDGE_PORT (and data-bridge-port on the script tag) to use another.`);
-  else console.error('[claude-voice]', err.message);
+  if (err.code === 'EADDRINUSE') console.error(`[voice-chat] Port ${PORT} is busy. Is the bridge already running? Set BRIDGE_PORT (and data-bridge-port on the script tag) to use another.`);
+  else console.error('[voice-chat]', err.message);
   process.exit(1);
 });
 
-function log(msg) { console.log(`[claude-voice] ${new Date().toLocaleTimeString()} ${msg}`); }
+function log(msg) { console.log(`[voice-chat] ${new Date().toLocaleTimeString()} ${msg}`); }
 
 server.listen(PORT, HOST, () => {
   log(`bridge on http://localhost:${PORT}${API_PATH}  backend=${BACKEND}  model=${MODEL}`);
-  log(envLoaded ? `env: ${envFile}` : `env: no .env at ${envFile} (using process environment)`);
-  const envDir = path.dirname(path.resolve(envFile));
+  log(envLoaded ? `env: ${envFile}` : envFile ? `env: no .env at ${envFile} (using process environment)`
+    : 'env: none named (automation/paths.yaml env_file: or VOICE_CHAT_ENV), using process environment');
+  const envDir = envLoaded ? path.dirname(path.resolve(envFile)) : '';
   if (envLoaded && (envDir === ROOT || envDir === path.resolve(ROOT, '..') || (SERVE_ROOT && envDir.startsWith(SERVE_ROOT)))) {
     log('WARNING: this .env sits inside your webroot. Other static servers or "wrangler deploy" could publish it.');
     log('         Move it above the webroot, or add the .assetsignore from assetsignore.example.');

@@ -1,12 +1,12 @@
 // The team's passphrase (TEAM_PASSPHRASE): routes that spend the site's own API keys ask for it, so only people
-// given it use them. claude-voice.js asks for it once and trades it at PASSPHRASE_PATH for a cookie that page
+// given it use them. voice-chat.js asks for it once and trades it at PASSPHRASE_PATH for a cookie that page
 // scripts can't read (HttpOnly), signed with TEAM_SESSION_SECRET or BETTER_AUTH_SECRET. The passphrase itself
 // isn't kept in the browser, so injected code or an extension can't copy it. Clients that can't keep the cookie,
 // such as a script on another site or the local bridge, send it in the x-team-passphrase header instead.
 
 export const PASSPHRASE_HEADER = 'x-team-passphrase';
 export const PASSPHRASE_PATH = '/api/team-passphrase';
-// Where older versions of claude-voice.js kept the passphrase in plain text; it reads and removes it once.
+// Where older versions of voice-chat.js kept the passphrase in plain text; it reads and removes it once.
 export const PASSPHRASE_STORAGE_KEY = 'team-passphrase';
 const COOKIE = 'team_pass';
 const COOKIE_DAYS = 30;
