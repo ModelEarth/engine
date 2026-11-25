@@ -2186,7 +2186,7 @@
 
   // Speech to text through the bridge (bridgeRec, below): what the bridge offers (transcriber, from .../status: { name,
   // model, local }), whether it's listening that way now, and whether the browser's own recognition has failed here.
-  let transcriber = null, viaBridgeStt = false, srBroken = false, srHeard = false, srMisses = 0;
+  let transcriber = null, viaBridgeStt = false, srBroken = false, srMisses = 0;
   const bridgeSttReady = () => !!transcriber && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
   const wakeByVoice = () => (viaBridgeStt ? !!(transcriber && transcriber.local) : !!SR);
 
@@ -2508,7 +2508,7 @@
   // --- speech recognition
   function startRecognition() {
     wantListening = true;
-    if (!SR || recRunning || listenPaused) return;
+    if (!SR || recRunning || listenPaused || viaBridgeStt) return;
     if (!rec) {
       rec = new SR();
       rec.continuous = true; rec.interimResults = true; rec.lang = cfg.lang; rec.maxAlternatives = 1;
@@ -2522,11 +2522,12 @@
         else if (e.error !== 'no-speech' || !noSpeechWarned) console.warn(why);
         if (e.error === 'no-speech') noSpeechWarned = true;
         // Where the bridge can listen instead (Speech to Text: Automatic), a failing service hands over to it: one that isn't
-        // allowed or doesn't know the language, one that can't be reached, and one that has never heard anything here in a
-        // conversation, twice in a row (Chrome on a Mac without the microphone for its recognition).
+        // allowed or doesn't know the language, one that can't be reached, or two consecutive silence errors.
+        // Local transcription also handles a wake phrase the browser never hears. Cloud transcription waits for a conversation.
         const handOver = () => sttFailed(`${isBrave ? 'Brave' : 'This browser'}’s speech input isn’t working here`);
         if (e.error === 'service-not-allowed' || e.error === 'language-not-supported') { if (handOver()) return; }
-        if (e.error === 'no-speech' && mode === 'listening' && !srHeard && ++srMisses >= 2 && handOver()) return;
+        const canHandOverSilence = mode === 'listening' || (mode === 'wake' && transcriber && transcriber.local);
+        if (e.error === 'no-speech' && canHandOverSilence && ++srMisses >= 2 && handOver()) return;
         if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
           wantListening = false; setMode('error'); ui.note('Microphone access was blocked. Allow it in the address bar, then tap the button. You can also type.', 12000); ui.showInput();
         } else if (e.error === 'audio-capture') {
@@ -2540,7 +2541,13 @@
       };
       rec.onend = () => {
         recRunning = false;
-        if (wantListening && !micHeld && !listenPaused) setTimeout(() => { if (wantListening && !recRunning && !micHeld && !listenPaused) { try { rec.start(); } catch (e) { /* already starting */ } } }, restartDelay);
+        if (wantListening && !micHeld && !listenPaused && !viaBridgeStt) {
+          setTimeout(() => {
+            if (wantListening && !recRunning && !micHeld && !listenPaused && !viaBridgeStt) {
+              try { rec.start(); } catch (e) { /* already starting */ }
+            }
+          }, restartDelay);
+        }
       };
     }
     try { rec.start(); } catch (e) { /* already running */ }
@@ -2777,7 +2784,7 @@
   }
 
   function onResult(e) {
-    restartDelay = 250; networkErrors = 0; noSpeechWarned = false; srHeard = true; srMisses = 0;
+    restartDelay = 250; networkErrors = 0; noSpeechWarned = false; srMisses = 0;
     let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
       if (i <= consumedUpTo) continue;

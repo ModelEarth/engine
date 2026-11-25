@@ -87,7 +87,7 @@ How the bridge runs each turn:
 
 Brave, Firefox and iOS browsers other than Safari have no speech input, and Chrome's sometimes hears nothing. For these, the widget can record what you say and send it to the bridge, which turns it into text. Each turn ends at a pause and goes to `POST /api/voice-chat/transcribe` as a 16 kHz WAV. The text then goes to `claude -p` like any spoken turn.
 
-- **Automatic (default):** the widget uses the browser's own speech input. It switches to the bridge when that's missing or fails: "service-not-allowed", repeated "network" errors, or nothing ever heard during a conversation. Speech to Text in the settings panel's Listening section can also be set to Browser or Bridge.
+- **Automatic (default):** the widget uses the browser's own speech input. It switches to the bridge when that's missing or fails: "service-not-allowed", repeated "network" errors, or two consecutive "no-speech" errors during a conversation. With local transcription, two "no-speech" errors while waiting for the wake phrase also switch to the bridge. A successful browser result resets the silence count. Speech to Text in the settings panel's Listening section can also be set to Browser or Bridge.
 - **When it listens:** not while Claude speaks or thinks. To start, you say "Ok Claude" when the transcriber runs on this computer. With a cloud service, a tap starts the conversation instead, so audio isn't sent to the cloud all the time.
 
 The bridge picks a transcriber when it starts (`TRANSCRIBE=auto`), and its log says which:
