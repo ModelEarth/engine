@@ -9,6 +9,9 @@
    else is in the area, stacked below it, stays put. Hidden (talk-circle.js place) hides the circle only, keeping its
    size, so it can be sized to fit before it shows. */
 .talk-circle-slot { flex: none; display: flex; align-items: center; justify-content: center; width: var(--talk-d, 400px); height: var(--talk-d, 400px); }
+/* Moved up (--talk-lift) above the open lower-left panel (#beanPanel), with its voice buttons hidden (talk-circle.js liftAbove). */
+.talk-circle-area { translate: 0 calc(-1 * var(--talk-lift, 0px)); }
+.talk-circle-area.talk-circle-bean > .talk-circle-voices { display: none; }
 .talk-circle-area[hidden] { display: flex; }
 .talk-circle-area[hidden] > .talk-circle-slot { visibility: hidden; }
 .talk-circle {
@@ -52,16 +55,20 @@
 .talk-circle-question, .talk-circle-hint { text-wrap: balance; }
 .talk-circle-hint:empty, .talk-circle-links:empty { display: none; }
 /* Voice choices below the circle before a conversation begins (talk-circle.js showVoices): toggles, several can be on. */
-.talk-circle-voices { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: min(560px, calc(100vw - 32px)); margin-top: 14px; pointer-events: auto; }
+.talk-circle-voices { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: min(560px, calc(100vw - 32px)); margin-top: 22px; pointer-events: auto; }
 .talk-circle-voices[hidden] { display: none; }
 .talk-circle-area[hidden] > .talk-circle-voices { visibility: hidden; }
 .talk-circle-voice { display: inline-flex; align-items: baseline; gap: 6px; padding: 6px 14px; border: 1px solid rgba(255, 255, 255, 0.4); border-radius: 999px;
   background: rgba(10, 12, 20, 0.35); color: #fff; font: inherit; font-size: 15px; line-height: 1.3; cursor: pointer; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
 .talk-circle-voice small { font-size: 12px; opacity: 0.75; }
 .talk-circle-voice:hover { background: rgba(255, 255, 255, 0.16); }
-.talk-circle-voice[aria-pressed="true"] { background: rgba(255, 255, 255, 0.92); border-color: #fff; color: #111; }
+/* A voice that's on: a bright ring on the same dark background, 2px wide without changing the button's size. */
+.talk-circle-voice[aria-pressed="true"] { border-color: rgba(150, 215, 255, 0.95); box-shadow: inset 0 0 0 1px rgba(150, 215, 255, 0.95), 0 0 10px rgba(90, 170, 255, 0.45); }
 .talk-circle-voice:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
 .talk-circle-voice.failed { opacity: 0.55; text-decoration: line-through; }
+/* The + at the row's end that shows the rest of the voices, and then the − that goes back to one line (talk-circle.js renderVoices). */
+.talk-circle-voice.talk-circle-more { align-self: center; align-items: center; justify-content: center; box-sizing: border-box; width: 34px; height: 34px; padding: 0; border-radius: 50%; }
+.talk-circle-voice.talk-circle-more svg { display: block; }
 /* Links to the page where Claude can answer, below the hint when the voice widget isn't loaded (talk-circle.js showLinks). */
 .talk-circle-links { margin-top: -0.3em; font-size: 16px; line-height: 1.4; color: rgba(255, 255, 255, 0.85); text-wrap: balance; }
 .talk-circle-links a { color: #fff; text-decoration: underline; text-underline-offset: 2px; }

@@ -22,9 +22,13 @@
    list. A tap stops the reply and asks that question. Once the reply has been spoken, the circle comes back and
    shows the question in full. Large words the circle crosses fade to TALK_DIM, so its question stays readable.
    When the conversation ends ("Thanks"), the question showing then stays, and the list moves on after TALK_MS.
+   While localsite's lower-left panel (#beanPanel, opened by the bean or the Earth map's tune circle) is open, the
+   circle moves up above it, smaller if it has to be, and its voice buttons hide (liftAbove).
 
    Before a conversation begins, a row of 2 to 10 voices from the widget (VoiceChat.voices()) shows below the circle as
-   toggles: several can be on, and they take turns. Each greets you when it's turned on. Once a conversation begins
+   toggles: several can be on, and they take turns. Each greets you when it's turned on. The row is one line of up to
+   VOICES_ROW (fewer when they don't fit), with those turned on among them, and a + at its right end that shows the rest
+   (and then a − to go back to one line). Once a conversation begins
    (a tap on the circle, speech or typing), the row goes for good on this page, and voices change in the widget's ⚙
    panel instead, which shares the same choice. */
 (function () {
@@ -75,6 +79,8 @@
   let text = "", asked = "", small = false, spot = null, wordsField = null, dimFrame = 0;
   let held = ""; // the question showing while the widget listens, kept when the conversation ends ("Thanks")
   let voicesRow = null, voicesDone = false; // the voice buttons, and whether a conversation has begun (they're gone)
+  let voiceList = [], voicesMore = false; // the voices for the row, and whether the + has shown them all
+  const VOICES_ROW = 5; // the most voice buttons in the row before the + shows the rest
 
   function el(tag, attrs = {}, ...children) {
     const e = document.createElement(tag);
@@ -146,7 +152,19 @@
       syncTimer();
     }, true);
     window.addEventListener("scroll", place, { passive: true });
-    window.addEventListener("resize", place);
+    window.addEventListener("resize", () => { renderVoices(); place(); });
+    // The lower-left panel opening, closing, or moving or resizing while open (beanPanel)
+    let watched = null;
+    const watchPanel = () => {
+      const panel = document.getElementById("beanPanel");
+      if (panel && panel !== watched) { watched = panel; new MutationObserver(place).observe(panel, { attributes: true, attributeFilter: ["style", "class"] }); }
+    };
+    let wasBean = document.documentElement.classList.contains("beanPanelOpen");
+    new MutationObserver(() => {
+      const now = document.documentElement.classList.contains("beanPanelOpen");
+      if (now === wasBean) return;
+      wasBean = now; watchPanel(); renderVoices(); place();
+    }).observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
     window.addEventListener("hashchange", showLinks);
     document.addEventListener("visibilitychange", syncTimer);
     document.addEventListener("keydown", arrowKeys);
@@ -198,15 +216,41 @@
     if (["listening", "thinking", "speaking"].includes(vc.state)) return endVoices();
     if (!choices) { vc.voices().then((c) => showVoices(c), () => {}); return; }
     const had = !voicesRow.hidden;
+    voiceList = choices;
     voicesRow.hidden = choices.length < 2;
-    voicesRow.replaceChildren(...choices.map((v) => {
-      const b = el("button", { type: "button", class: `talk-circle-voice${v.failed ? " failed" : ""}`, "aria-pressed": String(!!v.on),
-        title: v.failed ? `Not speaking: ${v.failed}` : [v.note, v.on ? "Tap to turn off" : "Tap to hear this voice and turn it on"].filter(Boolean).join(". ") },
-        el("span", { text: v.name }), el("small", { text: v.source === "browser" ? "Browser" : v.label }));
-      b.addEventListener("click", (e) => { e.stopPropagation(); vc.toggleVoice(v.id); });
-      return b;
-    }));
+    renderVoices();
     if (had !== !voicesRow.hidden) place();
+  }
+  function voiceButton(v) {
+    const b = el("button", { type: "button", class: `talk-circle-voice${v.failed ? " failed" : ""}`, "aria-pressed": String(!!v.on),
+      title: v.failed ? `Not speaking: ${v.failed}` : [v.note, v.on ? "Tap to turn off" : "Tap to hear this voice and turn it on"].filter(Boolean).join(". ") },
+      el("span", { text: v.name }), el("small", { text: v.source === "browser" ? "Browser" : v.label }));
+    b.addEventListener("click", (e) => { e.stopPropagation(); window.VoiceChat?.toggleVoice(v.id); });
+    return b;
+  }
+  // One line of up to VOICES_ROW voices, those turned on first to be kept, in the list's order, and one fewer at a time
+  // until they fit with the + after them. With the + pressed, all of them, and a − to go back.
+  function renderVoices() {
+    if (!voicesRow) return;
+    for (let limit = VOICES_ROW; ; limit--) {
+      let shown = voiceList;
+      if (!voicesMore && voiceList.length > limit) {
+        const keep = new Set(voiceList.filter((v) => v.on).slice(0, limit));
+        for (const v of voiceList) { if (keep.size >= limit) break; keep.add(v); }
+        shown = voiceList.filter((v) => keep.has(v));
+      }
+      const buttons = shown.map(voiceButton);
+      if (voiceList.length > shown.length || (voicesMore && voiceList.length > VOICES_ROW)) {
+        const more = el("button", { type: "button", class: "talk-circle-voice talk-circle-more", "aria-expanded": String(voicesMore),
+          title: voicesMore ? "Fewer voices" : "More voices", "aria-label": voicesMore ? "Fewer voices" : "More voices" });
+        more.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="${voicesMore ? "M5 12h14" : "M12 5v14M5 12h14"}" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>`;
+        more.addEventListener("click", (e) => { e.stopPropagation(); voicesMore = !voicesMore; renderVoices(); place(); });
+        buttons.push(more);
+      }
+      voicesRow.replaceChildren(...buttons);
+      const first = voicesRow.firstElementChild;
+      if (voicesMore || limit <= 1 || !first?.offsetHeight || voicesRow.offsetHeight <= first.offsetHeight * 1.5) break;
+    }
   }
   function endVoices() {
     if (voicesDone || !voicesRow) return;
@@ -399,18 +443,42 @@
   // else hide. placeCentered counts them already, with what else is in the area.
   function fitVoices() {
     if (!voicesRow?.isConnected || voicesRow.hidden || !opts.place) return true;
-    const h = area.clientHeight, row = voicesRow.offsetHeight + 14;
+    const h = area.clientHeight, row = voicesRow.offsetHeight + 22;
     const d = parseFloat(area.style.getPropertyValue("--talk-d")) || 0;
     if (!h || d + row <= h) return true;
     if (h - row >= TALK_MIN) area.style.setProperty("--talk-d", `${Math.floor(h - row)}px`);
     else voicesRow.hidden = true;
     return true;
   }
+  // The lower-left panel (#beanPanel, localsite.js), while it's open over the page (<html> .beanPanelOpen): its box,
+  // which the circle moves up to clear. Its voice buttons hide meanwhile (talk-circle.css).
+  function beanPanel() {
+    const panel = document.documentElement.classList.contains("beanPanelOpen") && document.getElementById("beanPanel");
+    const r = panel && panel.getBoundingClientRect();
+    return r && r.height > 0 && r.top < window.innerHeight ? r : null;
+  }
+  // Up, by --talk-lift, until the circle and what's stacked below it (project/care: the title) are 16px above the open
+  // panel, and the circle smaller, down to TALK_MIN, when there isn't room for them above the panel in the area.
+  function liftAbove(panel) {
+    const limit = panel.top - 16;
+    const bottom = () => Math.max(...[...area.children].filter((c) => c.getClientRects().length).map((c) => c.getBoundingClientRect().bottom));
+    if (bottom() <= limit) return;
+    const top = Math.max(area.getBoundingClientRect().top, 0) + 8;
+    const over = bottom() - slot.getBoundingClientRect().top - (limit - top);
+    const d = parseFloat(area.style.getPropertyValue("--talk-d")) || slot.offsetHeight;
+    if (over > 0) area.style.setProperty("--talk-d", `${Math.max(TALK_MIN, Math.floor(d - over))}px`);
+    const lift = Math.max(0, Math.min(bottom() - limit, slot.getBoundingClientRect().top - top));
+    if (lift) area.style.setProperty("--talk-lift", `${Math.round(lift)}px`);
+  }
   // Shows the circle when it has questions and room (opts.place, else placeCentered). The page's place is asked
   // either way, since it may do more, such as project/goals marking its up/down arrow.
   function place() {
     if (!area) return;
-    const room = (opts.place || placeCentered)(area) && fitVoices();
+    const panel = beanPanel();
+    area.classList.toggle("talk-circle-bean", !!panel);
+    area.style.removeProperty("--talk-lift");
+    const room = (opts.place || placeCentered)(area) && (panel || fitVoices());
+    if (room && panel) liftAbove(panel);
     const on = !!room && questions.length > 0;
     if (on) {
       if (area.hidden) setState(talking ? zone.dataset.state : "idle");

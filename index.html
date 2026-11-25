@@ -26,9 +26,9 @@ $(document).on("change"
 <script type="text/javascript" src="js/talk-circle.js"></script>
 <style>
 /* The talk circle's area (js/talk-circle.js) covers the Earth map in #fullscreen, with the circle centered on it.
-   Clicks outside the circle pass through to the map. It stops above the map's Controls panel in the lower left, so
-   the voice buttons below the circle stay clear of it. */
-#fullscreen > .engine-talk { position: absolute; inset: 0 0 auto 0; height: calc(100% - 300px); min-height: 320px; z-index: 101; padding: 16px; box-sizing: border-box; }
+   Clicks outside the circle pass through to the map. While the map's lower-left panel (#beanPanel) is open, the circle
+   moves up above it and its voice buttons hide (talk-circle.js liftAbove). */
+#fullscreen > .engine-talk { position: absolute; inset: 0; z-index: 101; padding: 16px; box-sizing: border-box; }
 </style>
 <link rel="stylesheet" href="../localsite/css/nouislider.min.css" />
 
