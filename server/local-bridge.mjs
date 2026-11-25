@@ -507,8 +507,8 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    let messages, output, page, tab, voice;
-    try { ({ messages, output, page, tab, voice } = JSON.parse(await readBody(req))); messages = sanitizeMessages(messages); } catch { messages = null; }
+    let messages, output, page, tab, voice, tools;
+    try { ({ messages, output, page, tab, voice, tools } = JSON.parse(await readBody(req))); messages = sanitizeMessages(messages); } catch { messages = null; }
     if (!messages) { res.writeHead(400, { ...cors, 'content-type': 'application/json' }); return res.end('{"error":"Bad request"}'); }
     noteRequest(req, 'question', typeof page === 'string' ? page.slice(0, 300) : '', tab);
 
@@ -528,7 +528,7 @@ const server = http.createServer(async (req, res) => {
       if (info.thinking) send({ t: 'thinking', v: info.thinking });
     };
     try {
-      await (BACKEND === 'api' ? askApi : askCli)(messages, systemPrompt(output, page, voice), (text) => send({ t: 'text', v: text }), ac.signal, output, onInfo, page);
+      await (BACKEND === 'api' ? askApi : askCli)(messages, systemPrompt(output, page, voice, tools), (text) => send({ t: 'text', v: text }), ac.signal, output, onInfo, page);
       if (ac.signal.aborted) outcome = 'stopped';
       send({ t: 'done' });
       log(`${outcome === 'stopped' ? 'stopped' : 'answered'} via ${BACKEND} in ${Date.now() - started} ms`);

@@ -194,10 +194,10 @@ export async function handleVoiceChat(request, env, ctx, { passphrase: required 
     if (!success) return Response.json({ error: 'Too many requests' }, { status: 429, headers: cors });
   }
 
-  let messages = null, output = null, page = null, voice = null;
+  let messages = null, output = null, page = null, voice = null, pageActions = null;
   try {
     const body = await request.text();
-    if (body.length <= 200_000) ({ messages, output, page, voice } = JSON.parse(body));
+    if (body.length <= 200_000) ({ messages, output, page, voice, tools: pageActions } = JSON.parse(body));
     messages = sanitizeMessages(messages);
   } catch { messages = null; }
   if (!messages) return Response.json({ error: 'Bad request' }, { status: 400, headers: cors });
@@ -208,7 +208,7 @@ export async function handleVoiceChat(request, env, ctx, { passphrase: required 
   const send = (obj) => writer.write(enc.encode(JSON.stringify(obj) + '\n')).catch(() => {});
 
   // Claude first, then Gemini. A provider that fails before saying anything hands over to the next one.
-  const system = systemPrompt(output, page, voice);
+  const system = systemPrompt(output, page, voice, pageActions);
   const gemini = (apiKey) => ({ name: 'Gemini', model: env.GEMINI_MODEL || GEMINI_DEFAULT_MODEL,
     stream: (o) => streamGemini({ ...o, apiKey, model: env.GEMINI_MODEL || GEMINI_DEFAULT_MODEL, system: standingIn(system, 'Gemini') }) });
   const openaiStyle = (p, apiKey) => ({ name: p.name, model: p.model,

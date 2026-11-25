@@ -12,11 +12,12 @@ const handlers = section('  function startRecognition()', '  // --- speech to te
 const fallback = section('  function sttFailed(', '  // The Speech to Text choice');
 const results = section('  function onResult(', '  function onFinal(');
 
-function widget({ local = true, choice = 'auto', ready = true, mode = 'wake' } = {}) {
+function widget({ local = true, choice = 'auto', ready = true, mode = 'wake', micLevel = false } = {}) {
   const timers = [];
   const state = {
     mode, rec: null, wantListening: false, recRunning: false, listenPaused: false,
-    viaBridgeStt: false, srBroken: false, srMisses: 0,
+    viaBridgeStt: false, srBroken: false, srMisses: 0, sttSwitch: '',
+    micAn: micLevel ? {} : null, soundMs: 0, SOUND_MS: 400,
     restartDelay: 250, networkErrors: 0, noSpeechWarned: false,
     transcriber: { name: 'test transcriber', local },
     listenOpt: { stt: choice }, cfg: { lang: 'en-US' }, isBrave: false,
@@ -37,6 +38,7 @@ function widget({ local = true, choice = 'auto', ready = true, mode = 'wake' } =
   vm.runInContext(handlers + fallback + results, state);
   state.startRecognition();
   state.silence = () => state.rec.onerror({ error: 'no-speech' });
+  state.sound = (ms) => { state.soundMs += ms; };
   state.flush = () => timers.splice(0).forEach((fn) => fn());
   return state;
 }
@@ -101,5 +103,37 @@ test('microphone denial still reports an error without starting bridge capture',
   const w = widget();
   w.rec.onerror({ error: 'not-allowed' });
   assert.equal(w.mode, 'error');
+  assert.equal(w.handovers, 0);
+});
+
+test('with a mic level, silence in a quiet room never hands over', () => {
+  const w = widget({ micLevel: true });
+  for (let i = 0; i < 6; i++) w.silence();
+  assert.equal(w.handovers, 0);
+});
+
+test('with a mic level, two silences after sound hand over and say why', () => {
+  const w = widget({ micLevel: true, mode: 'listening' });
+  w.sound(500); w.silence();
+  w.silence();
+  assert.equal(w.handovers, 0);
+  w.sound(500); w.silence();
+  assert.equal(w.handovers, 1);
+  assert.match(w.sttSwitch, /^Switched to Bridge \(test transcriber\) at .+: This browser’s speech input isn’t hearing you\./);
+});
+
+test('a brief sound below the threshold does not count as missed speech', () => {
+  const w = widget({ micLevel: true });
+  w.sound(200); w.silence();
+  w.sound(200); w.silence();
+  assert.equal(w.handovers, 0);
+});
+
+test('a browser result clears sound heard before it', () => {
+  const w = widget({ micLevel: true, mode: 'listening' });
+  w.sound(500); w.silence();
+  w.sound(500);
+  w.onResult({ resultIndex: 0, results: [Object.assign([{ transcript: 'hello' }], { isFinal: true })] });
+  w.silence();
   assert.equal(w.handovers, 0);
 });

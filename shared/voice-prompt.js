@@ -117,11 +117,34 @@ ${choose ? `The voices turned on now, which take turns:\n${on.map((v) => `- ${vo
 - If asked which voice is speaking, or what your voice is called, give the voice's name and where it comes from (such as "I'm Claude, speaking with ${spokenName(now || on[0])}"), rather than only saying you're Claude. The person can change voices under Voices in the ⚙ settings, or with the buttons below a talk circle before a conversation starts.`;
 }
 
+/** The page's tools (the request's "tools" field: MCP tool definitions, from window.pageTools in js/voice-chat.js), checked
+    and capped. The page runs them: the reply names one in an action tag (actionRules). */
+export function pageTools(tools) {
+  if (!Array.isArray(tools)) return [];
+  return tools.slice(0, 12).map((t) => (t && typeof t === 'object' && /^[A-Za-z][\w-]{0,63}$/.test(t.name)
+    ? { name: t.name, description: clean(t.description, 1500), inputSchema: t.inputSchema && typeof t.inputSchema === 'object' ? t.inputSchema : { type: 'object' } }
+    : null)).filter((t) => t && JSON.stringify(t).length <= 12000);
+}
+
+// Page actions: what the person's page lets the reply change, such as the Earth map it shows. Any model can answer with
+// them, since they're a tag in the reply rather than the API's tool calls, and the page runs them as the reply arrives.
+const actionRules = (tools) => `
+
+Page actions: the page the person is on can change what it shows for you. The actions, as MCP tool definitions:
+${JSON.stringify(tools)}
+- When a request is about something an action can show, such as the weather or a place on a map, use it: write one action tag on its own line right after the mood header, before the spoken reply:
+<action>{"name":"${tools[0].name}","input":{}}</action>
+- input follows the action's inputSchema. Give only what the request calls for; fields left out keep what the page shows now.
+- More than one action tag is allowed, each on its own line. Don't use an action when none fits the request.
+- The tag must be valid JSON on a single line and is never spoken. Then speak as usual, saying briefly what is now on screen.
+- The time now is about ${new Date().toISOString().slice(0, 13)}:00Z (UTC), for times such as tomorrow or tonight.`;
+
 /** The system prompt for one request. output: { conversation, important, sets } from the page's Text Output choices.
-    page: the path (and hash) of the page the person is on. voice: the voices (voiceRules). */
-export function systemPrompt(output, page, voice) {
+    page: the path (and hash) of the page the person is on. voice: the voices (voiceRules). tools: the page's actions (pageTools). */
+export function systemPrompt(output, page, voice, tools) {
   const path = pagePath(page);
-  return SYSTEM_PROMPT + (path ? pageRules(path) : '') + voiceRules(voice)
+  const actions = pageTools(tools);
+  return SYSTEM_PROMPT + (path ? pageRules(path) : '') + (actions.length ? actionRules(actions) : '') + voiceRules(voice)
     + (output?.conversation === false ? QUIET_RULES : '')
     + (output?.important === true ? IMPORTANT_RULES : '') + (output?.sets === true ? WORD_SET_RULES : '');
 }

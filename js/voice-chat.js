@@ -606,6 +606,10 @@
       out += '<'; s = s.slice(1);
     }
   }
+  // The page's tools (window.pageTools, localsite.js registerPageTool()): MCP tools with execute(input), which Claude
+  // picks with an action tag in its reply (shared/voice-prompt.js actionRules).
+  const pageTools = () => (Array.isArray(window.pageTools) ? window.pageTools : [])
+    .filter((t) => t && typeof t.name === 'string' && typeof t.execute === 'function');
   function dropLeadTags(s, found) {
     for (;;) {
       s = s.trimStart();
@@ -669,7 +673,7 @@
       try { mood = JSON.parse(m[1]); } catch (e) { mood = m[1].trim(); }
       dropLeadTags(s.slice(m[0].length), tags);
     }
-    return { tags, mood };
+    return { tags: tags.filter((t) => t.name !== 'action'), mood };
   }
 
   function parseSummary(s) {
@@ -1111,7 +1115,15 @@
         .panel .vbtn { padding: 3px 10px; font-size: 12px; line-height: 1.4; backdrop-filter: none; -webkit-backdrop-filter: none; border-color: rgba(255,255,255,.28); background: none; }
         .panel .vbtn:hover { background: rgba(255,255,255,.12); }
         .panel .vbtn[aria-pressed="true"] { background: #f4f6fb; color: #121622; border-color: #f4f6fb; }
-        .panel .vbtn.failed { text-decoration: line-through; opacity: .6; }
+        /* A setting changed on its own after starting: Speech to Text handed over to the bridge, or a voice set aside. Amber until
+           chosen again; the ⚙ button shows a dot until the panel is opened. */
+        .panel .vbtn.failed { text-decoration: line-through; border-color: #f0b43c; color: #f6cf7a; background: rgba(240,180,60,.14); }
+        .panel .vbtn.failed[aria-pressed="true"] { background: rgba(240,180,60,.3); color: #f6cf7a; border-color: #f0b43c; }
+        .panel label.auto-changed { margin: 0 -8px; padding: 6px 8px 7px; border-radius: 10px; background: rgba(240,180,60,.14); box-shadow: inset 3px 0 0 #f0b43c; }
+        .panel label.auto-changed select { border-color: #f0b43c; }
+        .listen label > small.auto-note:not([hidden]) { display: block; margin-top: 1px; color: #f6cf7a; opacity: 1; }
+        .gear { position: relative; }
+        .gear.auto-changed::after { content: ''; position: absolute; top: 3px; right: 3px; width: 8px; height: 8px; border-radius: 50%; background: #f0b43c; box-shadow: 0 0 0 2px rgba(10,12,20,.55); }
         .text-out, .agent, .listen, .tabs { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.14); }
         .text-out .head, .agent .head, .listen .head, .tabs .head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
         /* "Details" shows each choice's description under its one-line label. .btn-sm as in localsite's base.css, which can't reach in here. */
@@ -1234,7 +1246,7 @@
             <div class="head"><span id="cv-listen">Listening</span><button class="details btn-sm" type="button" aria-expanded="false">Details</button></div>
             <label class="check"><input type="checkbox" name="overlap"><span>Hear Me While Claude Speaks<small>The mic stays on while Claude talks. Claude's own words are left out of what it hears, so what you say at the same time is kept, and Claude listens until you stop.</small><small class="off-note" hidden></small><small class="off-why" hidden></small></span></label>
             <label class="inline">End of Your Turn<select name="endPause"><option value="500">0.5 seconds</option><option value="800">0.8 seconds</option><option value="1000">1 second</option><option value="1500">1.5 seconds</option><option value="2500">2.5 seconds</option></select><small>How long a pause in your speaking sends what you said.</small></label>
-            <label class="inline stt">Speech to Text<select name="stt"><option value="auto">Automatic</option><option value="browser">Browser</option><option value="bridge">Bridge</option></select><small>Automatic uses the browser's own speech input, and the bridge's where that's missing or isn't hearing you. The bridge records what you say and turns it into text on this computer (whisper.cpp) or with a cloud service.</small></label>
+            <label class="inline stt">Speech to Text<select name="stt"><option value="auto">Automatic</option><option value="browser">Browser</option><option value="bridge">Bridge</option></select><small>Automatic uses the browser's own speech input, and the bridge's where that's missing or isn't hearing you. The bridge records what you say and turns it into text on this computer (whisper.cpp) or with a cloud service.</small><small class="auto-note" hidden></small></label>
             <label class="inline mic-back">Mic Back After Claude<select name="micBack"><option value="250">0.25 seconds</option><option value="700">0.7 seconds</option><option value="1200">1.2 seconds</option></select><small>With Hear Me While Claude Speaks off, the mic is off while Claude talks and comes back this long after, once the echo has faded.</small></label>
           </div>
           <div class="tabs" role="group" aria-labelledby="cv-tabs">
@@ -1300,7 +1312,14 @@
     const showPanel = (on) => {
       if (on !== panel.classList.contains('on')) wrap.style.width = on ? `${wrap.getBoundingClientRect().width}px` : '';
       panel.classList.toggle('on', on); wrap.classList.toggle('settings-open', on); gear.setAttribute('aria-expanded', String(on));
-      if (on) { actions.panelOpened(); fitPanel(); }
+      if (on) { actions.panelOpened(); fitPanel(); markAutoChanges(); }
+    };
+    // The ⚙ button's dot: an automatic change (.auto-changed, a .failed voice) the panel hasn't been opened to see yet.
+    let autoSeen = '';
+    const markAutoChanges = () => {
+      const now = [...panel.querySelectorAll('label.auto-changed .auto-note, .vbtn.failed')].map((el) => el.title || el.textContent).join('|');
+      if (panel.classList.contains('on') || !now) autoSeen = now;
+      gear.classList.toggle('auto-changed', !!now && now !== autoSeen);
     };
     // The panel's top (its Voice and Chosen voice lines) stays at least PANEL_TOP from the window's top, so it isn't behind
     // the page's search filters. When it's taller than the room, its height is capped there and its contents scroll.
@@ -1594,6 +1613,7 @@
       },
       /** The voices, grouped by source: [{ title, note, voices: [{ id, name, note, on, failed }], keys, remove }]. */
       setVoiceGroups(groups) {
+        requestAnimationFrame(markAutoChanges);
         vgroups.replaceChildren(...groups.map((g) => {
           const box = make('div', 'vg'), head = make('div', 'vg-head');
           head.append(make('span', '', g.title));
@@ -1627,7 +1647,8 @@
       // stt: the bridge's speech to text ({ name, model, local }), or null where there's none. Without the browser's own
       // speech input (noSR), only the Speech to Text and End of Your Turn lines apply. recording: speech goes through stt
       // now (viaBridgeStt), recorded a turn at a time, so Hear Me While Claude Speaks can't apply and says why.
-      setListening(o, noSR, stt, recording) {
+      // switched: why Automatic handed over to the bridge, or '' (highlighted at Speech to Text and the line it turned off).
+      setListening(o, noSR, stt, recording, switched) {
         listenBox.hidden = noSR && !stt;
         listenInputs.forEach((c) => { if (c.type === 'checkbox') c.checked = !!o[c.name]; else c.value = String(o[c.name]); });
         $('.stt').hidden = !stt;
@@ -1646,6 +1667,11 @@
               : stt.local ? '' : ` Listening over ${shownName()} would also send that voice to ${stt.name}, which bills for each minute of audio.`);
         }
         $('.mic-back').hidden = !!o.overlap || noSR;
+        const autoNote = $('.stt .auto-note');
+        autoNote.hidden = !switched; autoNote.textContent = switched || '';
+        $('.stt').classList.toggle('auto-changed', !!switched);
+        overlap.closest('label').classList.toggle('auto-changed', !!switched && off && !noSR && !!o.overlap);
+        markAutoChanges();
       },
       /** Finding This Tab: { raise, notify }. canRaise: the bridge can bring tabs forward here; canNotify: this browser
        *  shows notifications; notifyNote: why Notify Me is off, or ''. */
@@ -1811,6 +1837,7 @@
     listening(name, value) {
       listenOpt[name] = value;
       store(LISTEN_KEY, JSON.stringify(listenOpt));
+      if (name === 'stt') { srBroken = false; srMisses = 0; sttSwitch = ''; } // a choice made here gives the browser another try
       showListening();
       if (name === 'stt') applyStt();
       if (name === 'overlap') micHold(mode === 'speaking'); // Turned on while Claude speaks, the mic comes back now
@@ -1926,6 +1953,23 @@
   ['pointerdown', 'keydown', 'touchend'].forEach((ev) => document.addEventListener(ev, unlockAudio, { once: true, capture: true }));
 
   let audioCtx = null, micStream = null; // micStream: the mic level's, which the bridge's recorder (bridgeRec) shares
+  // How long (ms) the mic has picked up sound at speaking level while waiting for the wake phrase or listening, since the
+  // browser's recognition last heard words or reported silence. Chrome reports "no-speech" every few seconds in a quiet room,
+  // so only one that follows sound means its recognition isn't hearing you. Sampled ten times a second, apart from the
+  // scene's drawing, which pauses while hidden. micAn is null without the mic level (data-mic-level="false").
+  let micAn = null, soundMs = 0, soundTimer = 0;
+  const SOUND_RMS = 0.02, SOUND_MS = 400;
+  function watchSound(an) {
+    micAn = an;
+    clearInterval(soundTimer);
+    const buf = new Float32Array(an.fftSize);
+    soundTimer = setInterval(() => {
+      if (!recRunning || viaBridgeStt || micHeld || (mode !== 'wake' && mode !== 'listening')) return;
+      an.getFloatTimeDomainData(buf);
+      let sum = 0; for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+      if (Math.sqrt(sum / buf.length) > SOUND_RMS) soundMs += 100;
+    }, 100);
+  }
   async function startMicLevel() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
@@ -1940,6 +1984,7 @@
         return clamp(Math.sqrt(sum / (data.length / 4)) * 4, 0, 1);
       });
       watchSilentMic(an);
+      watchSound(an);
       return true;
     } catch (err) {
       return err && (err.name === 'NotAllowedError' || err.name === 'SecurityError') ? 'denied' : false;
@@ -2187,6 +2232,7 @@
   // Speech to text through the bridge (bridgeRec, below): what the bridge offers (transcriber, from .../status: { name,
   // model, local }), whether it's listening that way now, and whether the browser's own recognition has failed here.
   let transcriber = null, viaBridgeStt = false, srBroken = false, srMisses = 0;
+  let sttSwitch = ''; // why and when Automatic handed over to the bridge, shown highlighted at Speech to Text
   const bridgeSttReady = () => !!transcriber && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
   const wakeByVoice = () => (viaBridgeStt ? !!(transcriber && transcriber.local) : !!SR);
 
@@ -2198,7 +2244,7 @@
     if (saved) Object.keys(listenOpt).forEach((k) => { if (typeof saved[k] === typeof listenOpt[k]) listenOpt[k] = saved[k]; });
   } catch (e) { /* storage blocked or unreadable */ }
   if (!['auto', 'browser', 'bridge'].includes(listenOpt.stt)) listenOpt.stt = 'auto';
-  const showListening = () => ui.setListening(listenOpt, !SR, transcriber, viaBridgeStt);
+  const showListening = () => ui.setListening(listenOpt, !SR, transcriber, viaBridgeStt, viaBridgeStt ? sttSwitch : '');
   showListening();
 
   wordField.setCovers(ui.boxes);
@@ -2522,12 +2568,17 @@
         else if (e.error !== 'no-speech' || !noSpeechWarned) console.warn(why);
         if (e.error === 'no-speech') noSpeechWarned = true;
         // Where the bridge can listen instead (Speech to Text: Automatic), a failing service hands over to it: one that isn't
-        // allowed or doesn't know the language, one that can't be reached, or two consecutive silence errors.
-        // Local transcription also handles a wake phrase the browser never hears. Cloud transcription waits for a conversation.
-        const handOver = () => sttFailed(`${isBrave ? 'Brave' : 'This browser'}’s speech input isn’t working here`);
+        // allowed or doesn't know the language, one that can't be reached, or one that twice in a row reports silence after
+        // the mic picked up sound (watchSound), where there's a mic level to tell. Local transcription also takes over a wake
+        // phrase the browser never hears; cloud transcription waits for a conversation, so idle audio isn't sent to the cloud.
+        const handOver = () => sttFailed(`${isBrave ? 'Brave' : 'This browser'}’s speech input isn’t hearing you`);
         if (e.error === 'service-not-allowed' || e.error === 'language-not-supported') { if (handOver()) return; }
-        const canHandOverSilence = mode === 'listening' || (mode === 'wake' && transcriber && transcriber.local);
-        if (e.error === 'no-speech' && canHandOverSilence && ++srMisses >= 2 && handOver()) return;
+        if (e.error === 'no-speech') {
+          const missed = !micAn || soundMs >= SOUND_MS;
+          soundMs = 0;
+          const canHandOverSilence = mode === 'listening' || (mode === 'wake' && transcriber && transcriber.local);
+          if (missed && canHandOverSilence && ++srMisses >= 2 && handOver()) return;
+        }
         if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
           wantListening = false; setMode('error'); ui.note('Microphone access was blocked. Allow it in the address bar, then tap the button. You can also type.', 12000); ui.showInput();
         } else if (e.error === 'audio-capture') {
@@ -2707,6 +2758,8 @@
   function sttFailed(why) {
     if (listenOpt.stt !== 'auto' || !bridgeSttReady() || viaBridgeStt) return false;
     srBroken = true;
+    const at = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    sttSwitch = `Switched to Bridge (${transcriber.name}) at ${at}: ${why}. Choose Browser to try it again.`;
     listenVia(true, `${why}, so ${shownName()} now listens through the bridge (${transcriber.name}).`);
     return true;
   }
@@ -2784,7 +2837,7 @@
   }
 
   function onResult(e) {
-    restartDelay = 250; networkErrors = 0; noSpeechWarned = false; srMisses = 0;
+    restartDelay = 250; networkErrors = 0; noSpeechWarned = false; srMisses = 0; soundMs = 0;
     let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
       if (i <= consumedUpTo) continue;
@@ -3061,13 +3114,48 @@
     let strayHeld = ''; // tool-call markup still arriving (stripStray)
     const calls = [], toolList = [];
     let thinking = '';
+    // Page actions (pageTools()): <action>{"name":...,"input":{...}}</action>, usually right after the mood header, is run
+    // as it arrives, and taken out of what's shown and said. Each runs once, wherever in the reply it comes.
+    const ran = new Set();
+    const runAction = (text) => {
+      if (ran.has(text)) return;
+      ran.add(text);
+      let call;
+      try { call = JSON.parse(text); } catch (e) { return console.warn('[voice-chat] action isn’t JSON', text); }
+      const input = call && call.input && typeof call.input === 'object' ? call.input : {};
+      const tool = pageTools().find((t) => call && t.name === call.name);
+      if (!tool) return console.warn('[voice-chat] no page action named', call && call.name);
+      toolList.push({ name: tool.name, target: JSON.stringify(input) });
+      Promise.resolve().then(() => tool.execute(input))
+        .then((result) => emit('action', { name: tool.name, input, result }))
+        .catch((err) => { console.warn('[voice-chat] action', tool.name, err); ui.note(`${tool.name}: ${err.message}`, 10000); });
+    };
+    const runLeadActions = (found) => found.forEach((t) => { if (t.name === 'action') runAction(t.text); });
+    let actionHeld = ''; // an action tag still arriving
+    const pullActions = (s, final) => {
+      s = actionHeld + s; actionHeld = '';
+      for (;;) {
+        const at = s.indexOf('<action');
+        if (at < 0) break;
+        const end = s.indexOf('</action>', at);
+        if (end < 0) { if (!final) { actionHeld = s.slice(at); s = s.slice(0, at); } return s; }
+        runAction(s.slice(s.indexOf('>', at) + 1, end).trim());
+        s = s.slice(0, at) + s.slice(end + 9).replace(/^[ \t]*\n/, '');
+      }
+      const lt = s.lastIndexOf('<');
+      if (!final && lt >= 0 && '<action'.startsWith(s.slice(lt))) { actionHeld = s.slice(lt); s = s.slice(0, lt); }
+      return s;
+    };
     const feedBody = (chunk, final) => {
       if (bodyLead !== null) {
-        const rest = dropLeadTags(bodyLead + chunk);
+        const found = [];
+        const rest = dropLeadTags(bodyLead + chunk, found);
+        if (rest !== null) runLeadActions(found);
         if (!rest) { bodyLead = rest === null ? bodyLead + chunk : ''; return; }
         bodyLead = null; chunk = rest;
       }
       if (tailRaw !== null) { tailRaw += chunk; return showImportant(); }
+      chunk = pullActions(chunk, final);
       const st = stripStray(strayHeld + chunk, calls, final);
       strayHeld = st.rest; chunk = st.out;
       let s = held + chunk; held = '';
@@ -3079,8 +3167,10 @@
     const take = (chunk) => {
       raw += chunk;
       if (moodDone) return feedBody(chunk);
-      const head = dropLeadTags(raw);
+      const found = [];
+      const head = dropLeadTags(raw, found);
       if (head === null) return;
+      runLeadActions(found);
       if (head.length >= 6 && !head.startsWith('<mood')) { moodDone = true; voiceForReply(); return feedBody(head); }
       const end = head.indexOf('</mood>');
       if (end >= 0) {
@@ -3101,14 +3191,17 @@
     const thisRun = startRun();
     let retry = false; // with the visitor's own key, once the site's keys couldn't answer
     try {
+      if (window.pageToolsLoading) await Promise.race([window.pageToolsLoading, new Promise((r) => setTimeout(r, 1500))]);
+      const tools = pageTools().map(({ name, description, inputSchema }) => ({ name, description, inputSchema }));
+      if (ctl.signal.aborted) return;
       const res = await fetch(cfg.endpoint, {
         method: 'POST', signal: ctl.signal, credentials: viaBridge ? 'same-origin' : 'include', // the passphrase's cookie
         headers: { 'content-type': 'application/json',
           ...(ownKey && { 'x-provider-name': ownKey.name, 'x-provider-key': ownKey.key }),
           // With their own key too, so a Worker that gives Claude tools (such as reading the site's code) can tell it's the team.
           ...(passphrase() && { 'x-team-passphrase': passphrase() }) },
-        // page: where the person is on the site, so Claude can tell what they're looking at
-        body: JSON.stringify({ messages: history, page: location.pathname + location.hash, tab: tabId, voice: voiceContext(), output: { conversation: textOut.conversation, important: textOut.important, sets: textOut.words && textOut.sets && !wordField.off } }),
+        // page: where the person is on the site, so Claude can tell what they're looking at. tools: what it can change there.
+        body: JSON.stringify({ messages: history, page: location.pathname + location.hash, tab: tabId, voice: voiceContext(), output: { conversation: textOut.conversation, important: textOut.important, sets: textOut.words && textOut.sets && !wordField.off }, ...(tools.length && { tools }) }),
       });
       if (!res.ok || !res.body) {
         const body = await res.json().catch(() => ({}));
@@ -3139,6 +3232,7 @@
       if (strayHeld) feedBody('', true);
       if (held) { feedSpeech(held); held = ''; }
       showImportant(true);
+      for (const m of raw.matchAll(/<action[^<>]*>([\s\S]*?)<\/action>/g)) runAction(m[1].trim());
       const sum = tailRaw && tailRaw.match(/<summary>([\s\S]*)/);
       const words = parseSummary(sum && sum[1]);
       wordField.summary(words);
@@ -3413,6 +3507,7 @@
   }
   function releaseMic() {
     if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
+    clearInterval(soundTimer); micAn = null; soundMs = 0;
     if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
     scene.setLevelSource(null);
   }
