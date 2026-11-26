@@ -1,0 +1,50 @@
+/* Trivia's card (engine/js/trivia.js): the question, its choices, the score and the clip. In localsite's page tabs it
+   takes their colors (--pt-*), light or dark. */
+.trivia-card {
+  --tv-ink: var(--pt-ink, #0b0b0b);
+  --tv-ink-2: var(--pt-ink-2, #52514e);
+  --tv-muted: var(--pt-muted, #6f6e69);
+  --tv-grid: var(--pt-grid, rgba(11, 11, 11, 0.12));
+  --tv-accent: var(--pt-accent, #2a78d6);
+  --tv-right: #1f8a4c;
+  --tv-wrong: #c2412d;
+  margin: 0 0 22px; padding: 14px 16px 16px; border: 1px solid var(--tv-grid); border-radius: 12px;
+  color: var(--tv-ink-2); font-size: 15px; line-height: 1.45;
+}
+body.dark .trivia-card, :root[data-theme="dark"] .trivia-card { --tv-right: #5fd394; --tv-wrong: #ff8a75; }
+.trivia-card:empty { display: none; }
+.trivia-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; font-size: 13px; color: var(--tv-muted); }
+.trivia-head strong { color: var(--tv-ink); font-weight: 600; }
+.trivia-q { margin: 8px 0 10px; font-size: 18px; line-height: 1.35; color: var(--tv-ink); }
+.trivia-choices { list-style: none; margin: 0 0 10px; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 6px; }
+.trivia-choice {
+  width: 100%; text-align: left; font: inherit; color: var(--tv-ink); cursor: pointer;
+  background: none; border: 1px solid var(--tv-grid); border-radius: 8px; padding: 8px 10px;
+}
+.trivia-choice:hover:not(:disabled) { border-color: var(--tv-accent); }
+.trivia-choice:disabled { cursor: default; opacity: 0.6; }
+.trivia-choice[data-mark="right"] { opacity: 1; border-color: var(--tv-right); box-shadow: inset 0 0 0 1px var(--tv-right); }
+.trivia-choice[data-mark="wrong"] { opacity: 1; border-color: var(--tv-wrong); text-decoration: line-through; }
+.trivia-result { margin: 0 0 6px; font-weight: 600; }
+.trivia-result[data-mark="right"] { color: var(--tv-right); }
+.trivia-result[data-mark="wrong"] { color: var(--tv-wrong); }
+.trivia-facts { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0 0 10px; font-size: 14px; }
+.trivia-facts dt { color: var(--tv-muted); }
+.trivia-facts dd { margin: 0; color: var(--tv-ink); }
+.trivia-clip, .trivia-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.trivia-btn {
+  font: inherit; font-size: 14px; cursor: pointer; color: var(--tv-ink);
+  background: none; border: 1px solid var(--tv-grid); border-radius: 999px; padding: 5px 12px;
+}
+.trivia-btn:hover { border-color: var(--tv-accent); }
+.trivia-primary { background: var(--tv-accent); border-color: var(--tv-accent); color: #fff; }
+.trivia-choice:focus-visible, .trivia-btn:focus-visible, .trivia-badge:focus-visible { outline: 2px solid var(--tv-accent); outline-offset: 2px; }
+.trivia-muted, .trivia-source { font-size: 13px; color: var(--tv-muted); }
+.trivia-problem { margin: 8px 0 0; font-size: 14px; color: var(--tv-wrong); }
+/* Shown beside an Apple preview while it can play, as Apple's terms ask: a link to the song in Apple Music. */
+.trivia-badge {
+  display: inline-flex; flex-direction: column; justify-content: center; line-height: 1.05; text-decoration: none;
+  padding: 4px 12px; border-radius: 7px; border: 1px solid #a6a6a6; background: #000; color: #fff;
+  font: 600 14px/1.05 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.trivia-badge small { font-size: 9px; font-weight: 400; letter-spacing: 0.02em; }

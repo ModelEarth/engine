@@ -80,7 +80,7 @@
  * typing box. Each reply's extras are kept with it (thinking cut to its first 2,000 characters), so replies chosen from
  * the ⋯ menu have their own light bulbs. Choosing a conversation brings back the mood of its last reply (the colors
  * and motion), and a reply's light bulb brings back that reply's mood.
- * API: window.VoiceChat.{start, stop, say, ask, focusInput, hideText, end, interrupt, setMood, clearWords, pauseAudio, pauseMotion, openKeys, on}
+ * API: window.VoiceChat.{start, stop, say, ask, consult, focusInput, hideText, end, interrupt, setMood, clearWords, pauseAudio, pauseMotion, openKeys, on}
  * Events (voice-chat:<type> on the widget's host, or VoiceChat.on(type)): state, start, reply, mood, end, elsewhere
  * (another tab turned voice on, so it's off here), and pause
  * ({ audio, motion, listening }: which are paused, after the pause button or a change to listening's pause).
@@ -2995,8 +2995,9 @@
 
   // A page's question, such as from a prompt on screen: Claude says it, then listens for the answer, which goes to Claude
   // with the question before it. context, when given, is sent first as the person's own framing for a new conversation,
-  // since the conversation has to start with them (sanitizeMessages, shared/voice-prompt.js).
-  async function askAloud(question, context) {
+  // since the conversation has to start with them (sanitizeMessages, shared/voice-prompt.js). note, when given, goes just
+  // before this question in any conversation, unspoken and not logged, such as a trivia question's answer (engine/js/trivia.js).
+  async function askAloud(question, context, note) {
     question = String(question || '').trim();
     if (!question) return;
     unlockAudio();
@@ -3005,12 +3006,56 @@
     if (mode !== 'listening') beginConversation('', true);
     clearTimeout(sendTimer); pending = ''; queuedTurn = '';
     if (context && !history.length) history.push({ role: 'user', content: String(context) });
+    if (note) history.push({ role: 'user', content: String(note) });
     history.push({ role: 'assistant', content: question });
     logTurn('claude', question);
     lookedHere = false;
     ui.claude(question, true);
     streamDone = true;
     enqueueSpeech(question);
+  }
+
+  // A one-off question for Claude that isn't spoken, shown or kept in the conversation, such as a song's mood for a page
+  // playing music (engine/js/trivia.js). tools: the names of the page's tools it may pick from (pageTools()). Resolves to
+  // { mood, actions, text }: the reply's mood header (null without one), its action tags ({ name, input }, not run) and
+  // the rest of its text. Resolves to null when there's no answer, as without the site's passphrase.
+  async function consult(prompt, tools) {
+    const offered = pageTools().filter((t) => !tools || tools.includes(t.name)).map(({ name, description, inputSchema }) => ({ name, description, inputSchema }));
+    let raw = '';
+    try {
+      const res = await fetch(cfg.endpoint, {
+        method: 'POST', credentials: viaBridge ? 'same-origin' : 'include',
+        headers: { 'content-type': 'application/json',
+          ...(ownKey && { 'x-provider-name': ownKey.name, 'x-provider-key': ownKey.key }),
+          ...(passphrase() && { 'x-team-passphrase': passphrase() }) },
+        body: JSON.stringify({ messages: [{ role: 'user', content: String(prompt) }], page: location.pathname + location.hash, tab: tabId,
+          voice: voiceContext(), output: { conversation: false, important: false, sets: false }, ...(offered.length && { tools: offered }) }),
+      });
+      if (!res.ok || !res.body) return null;
+      const reader = res.body.getReader(), dec = new TextDecoder();
+      let buf = '';
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          let evt; try { evt = JSON.parse(line); } catch { continue; }
+          if (evt.t === 'text') raw += evt.v;
+          else if (evt.t === 'error') return null;
+        }
+      }
+    } catch (err) { console.warn('[voice-chat] consult', err); return null; }
+    let mood = null;
+    const head = raw.match(/<mood>([\s\S]*?)<\/mood>/);
+    try { mood = head ? JSON.parse(head[1]) : null; } catch (err) { /* a bad header: no mood */ }
+    const actions = [];
+    for (const m of raw.matchAll(/<action[^<>]*>([\s\S]*?)<\/action>/g)) {
+      try { const call = JSON.parse(m[1].trim()); if (call && typeof call.name === 'string') actions.push({ name: call.name, input: call.input && typeof call.input === 'object' ? call.input : {} }); } catch (err) { /* not JSON */ }
+    }
+    const text = raw.replace(/<(mood|action|important|summary)\b[^>]*>[\s\S]*?<\/\1>/g, '').trim();
+    return { mood, actions, text };
   }
 
   function endConversation(sayGoodbye) {
@@ -3723,9 +3768,12 @@
     /** Open the /keys page's list of keys on this page, as the "Set My Keys" button does. */
     openKeys: () => setMyKeys(),
     end: () => endConversation(true),
+    /** Asks Claude something unspoken, outside the conversation: resolves to { mood, actions, text } or null. tools: page tool names it may pick. */
+    consult: (prompt, tools) => consult(prompt, tools),
     /** Feed text as if it were spoken (useful for testing and for custom inputs). */
-    /** Claude asks this question aloud, then listens for the answer. context: optional framing sent first in a new conversation. */
-    ask: (question, context) => askAloud(question, context),
+    /** Claude asks this question aloud, then listens for the answer. context: optional framing sent first in a new conversation.
+        note: optional framing for this question only, sent unspoken just before it, such as its answer. */
+    ask: (question, context, note) => askAloud(question, context, note),
     /** Show the typing box and put the cursor in it, for an answer typed rather than spoken. */
     focusInput: () => ui.showInput(true),
     /** The agent's names, as a list or comma-separated ("Little Bird, Sparrow"): the first is shown, and any starts a conversation. Empty for Claude. */

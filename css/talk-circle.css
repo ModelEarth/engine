@@ -88,3 +88,30 @@ html.talk-circle-talking .talk-circle-hide { opacity: 0; visibility: hidden; }
   .talk-circle::before, .talk-circle::after { animation: none; }
   .talk-circle::after { display: none; }
 }
+/* While music plays (talk-circle.js showMusic): the song's title and artist, raised a little, with round arrows in a
+   fixed place near the circle's bottom that step through the songs, and the clip's source between them (an Apple
+   Music link beside a preview, as Apple's terms ask). They hide while the circle is small. */
+.talk-circle-slot { position: relative; }
+.talk-circle[data-music] { padding-bottom: calc(var(--talk-d, 400px) * 0.26); }
+.talk-circle-arrows {
+  position: absolute; left: 50%; bottom: calc(var(--talk-d, 400px) * 0.08); translate: -50% 0;
+  width: min(220px, calc(var(--talk-d, 400px) * 0.6)); display: grid; grid-template-columns: 40px 1fr 40px; align-items: center; gap: 6px;
+  pointer-events: auto;
+}
+.talk-circle-arrows[hidden], .talk-circle-small ~ .talk-circle-arrows { display: none; }
+.talk-circle-arrow {
+  display: grid; place-items: center; box-sizing: border-box; width: 40px; height: 40px; padding: 0; border-radius: 50%; cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.45); background: rgba(10, 12, 20, 0.4); color: #fff;
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.talk-circle-arrow:hover { background: rgba(255, 255, 255, 0.18); }
+.talk-circle-arrow:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+.talk-circle-source { min-width: 0; text-align: center; font-size: 12px; line-height: 1.1; color: rgba(255, 255, 255, 0.85); text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); }
+.talk-circle-source a { color: inherit; text-decoration: none; overflow-wrap: anywhere; }
+.talk-circle-source a:hover, .talk-circle-source a:focus-visible { text-decoration: underline; }
+.talk-circle-source .talk-circle-badge {
+  display: inline-flex; flex-direction: column; padding: 3px 9px; border-radius: 6px; border: 1px solid #a6a6a6; background: #000; color: #fff;
+  font-weight: 600; font-size: 12px; text-shadow: none;
+}
+.talk-circle-source .talk-circle-badge small { font-size: 8px; font-weight: 400; }
+.talk-circle-source .talk-circle-badge:hover { text-decoration: none; }

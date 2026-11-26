@@ -2,7 +2,7 @@
    type, for people to answer by voice, such as seniors and people living with dementia. A tap or click on it has
    the voice widget (engine/js/voice-chat.js) ask the question aloud and listen for the answer, and Claude replies
    warmly with a gentle follow-up. Without the voice widget, the browser just reads the question aloud. The left and
-   right arrow keys move through the questions (arrowKeys).
+   right arrow keys move through the questions (arrowKeys), or the songs while music plays.
    Styles are in engine/css/talk-circle.css. Used by project/goals (above its tabs), project/care
    (centered), engine/index.html and any page whose #fullscreen localsite adds when the Earth map opens (insertFullscreen).
 
@@ -33,13 +33,21 @@
    (a tap on the circle, speech or typing), the row hides, and voices change in the widget's ⚙ panel instead, which
    shares the same choice. Claude can bring the row back (show_voices) until the conversation ends.
 
-   The ⓘ opens the commands: Weather, Voices and Locations tabs over the left 2/3 of #fullscreen (localsite's page tabs,
-   localsite/js/page-tabs.js), each a README from info/ beside this folder, also opened when the person says "Show
-   commands" and closed by the ⓘ, the tabs' × or "Hide commands". With #info=voices (or another tab) in the hash,
-   they open on load. While they're open, the circle moves to the space at their right (placeSide).
+   The ⓘ opens the commands on their Voices tab (info=voices in the hash): Weather, Voices, Locations and Music tabs over
+   the left 2/3 of #fullscreen (localsite's page tabs, localsite/js/page-tabs.js), each a README from info/ beside this
+   folder, also opened when the person says "Show commands" and closed by the ⓘ, the tabs' × or "Hide commands". With
+   #info=voices (or another tab) in the hash, they open on load, and otherwise they start in localsite's mini nav pill,
+   as its expand icon. While they're open, the circle moves to the space at their right (placeSide).
+
+   Music trivia (TRIVIA): questions from feed/music beside this folder, asked aloud with a clip of each song (js/trivia.js).
+   The Music tab shows the question under way above its commands and feed/music/README.md, and opens when one is asked.
+   Its Play Music button closes the tabs and plays every clip in turn. Meanwhile the circle shows the song's title, with
+   its artist and year below, and round arrows near its bottom (in a fixed place, with the clip's source between them)
+   step back and forward through the songs, as the left and right arrow keys do (arrowKeys). A tap pauses and resumes.
 
    Page actions (localsite.js registerPageTool, run from an action tag in Claude's reply): show_voices, hide_voices,
-   show_commands and hide_commands. set_voices, which turns voices on or off, is the widget's own (voice-chat.js). */
+   show_commands and hide_commands. set_voices, which turns voices on or off, is the widget's own (voice-chat.js), and
+   trivia_question, trivia_answer and trivia_end are trivia.js's. */
 (function () {
   "use strict";
   if (window.TalkCircle) return;
@@ -94,7 +102,17 @@
   let voicesAsked = false; // Claude showed the row during a conversation (show_voices), so it stays until the conversation ends
   let infoTabs = null; // The commands' page tabs, once opened
   const INFO = SCRIPT ? new URL("../info/", SCRIPT).href : "/engine/info/";
-  const INFO_TABS = [["weather", "Weather"], ["voices", "Voices"], ["locations", "Locations"]];
+  const INFO_TABS = [["weather", "Weather"], ["voices", "Voices"], ["locations", "Locations"], ["music", "Music"]];
+  const FEED = SCRIPT ? new URL("../../feed/", SCRIPT).href : "/feed/";
+  // Trivia sets (js/trivia.js), each shown in a commands tab above its commands and its own README.
+  const TRIVIA = [{
+    id: "georgia-music", title: "Georgia Music", about: "Georgia music", tab: "music", group: "City", groupPlural: "Georgia cities",
+    csv: `${FEED}music/georgia-music-trivia-all.csv`, readme: `${FEED}music/README.md`,
+    reveal: ["Artist (Musician/Band)", "Song", "Year", "Georgia Connection"],
+  }];
+  let trivia = null; // js/trivia.js, loading or loaded
+  let music = null; // The song playing (Trivia.music), while the circle shows it
+  let arrows = null; // The song arrows, with the clip's source between them
 
   function el(tag, attrs = {}, ...children) {
     const e = document.createElement(tag);
@@ -123,11 +141,23 @@
     area.hidden = true;
     // The circle's slot keeps its full size while the circle shrinks inside it, so what's beside it in the area
     // (project/care: the title below it) stays put. It goes first, before what the page put in the area.
-    slot = el("div", { class: "talk-circle-slot" }, zone);
+    const arrow = (dir, label, d) => {
+      const b = el("button", { type: "button", class: "talk-circle-arrow", "aria-label": label, title: label });
+      b.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="${d}" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+      b.addEventListener("click", (e) => { e.stopPropagation(); window.Trivia?.step(dir); });
+      return b;
+    };
+    arrows = el("div", { class: "talk-circle-arrows" },
+      arrow(-1, "Previous song", "M15 5l-7 7 7 7"), el("span", { class: "talk-circle-source" }), arrow(1, "Next song", "M9 5l7 7-7 7"));
+    arrows.hidden = true;
+    slot = el("div", { class: "talk-circle-slot" }, zone, arrows);
     voicesRow = el("div", { class: "talk-circle-voices", role: "group", "aria-label": "Voices" });
     voicesRow.hidden = true;
     area.prepend(slot, voicesRow);
+    // With info in the hash, its tab opens. Otherwise the commands start closed in localsite's mini nav pill, as its expand icon.
     if (/(^|[#&])info=/.test(location.hash)) commands().catch(() => {});
+    else commands().then((set) => { if (!set.isOpen()) window.miniNavClosed?.(set.el); }).catch(() => {});
+    loadTrivia().catch((e) => console.warn("[talk-circle] trivia", e));
     if (!area.isConnected) (opts.parent || document.body).append(area);
     // The voice widget's events don't bubble up from its target (#fullscreen), so they're heard capturing.
     document.addEventListener("voice-chat:state", (e) => {
@@ -268,7 +298,7 @@
       const info = el("button", { type: "button", class: "talk-circle-voice talk-circle-more talk-circle-info", title: "Commands",
         "aria-label": "Commands", "aria-controls": "infoTabs", "aria-expanded": String(commandsShown()) });
       info.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="7" r="1.6" fill="currentColor"/><path d="M12 11v7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>`;
-      info.addEventListener("click", (e) => { e.stopPropagation(); if (commandsShown()) hideCommands(); else showCommands().catch((err) => console.warn(err.message)); });
+      info.addEventListener("click", (e) => { e.stopPropagation(); if (commandsShown()) hideCommands(); else showVoicesTab().catch((err) => console.warn(err.message)); });
       buttons.push(info);
       voicesRow.replaceChildren(...buttons);
       const first = voicesRow.firstElementChild;
@@ -301,9 +331,46 @@
     const tabs = window.PageTabs || (typeof window.loadPageTabs === "function" ? await window.loadPageTabs() : null);
     if (!tabs) throw new Error("The commands need localsite (localsite/js/page-tabs.js)");
     infoTabs ||= tabs.create({ id: "infoTabs", label: "Commands", hash: "info", onChange: syncInfo, onClose: syncInfo,
-      tabs: INFO_TABS.map(([name, label]) => ({ name, label, readme: `${INFO}${name}.md` })) });
+      tabs: INFO_TABS.map(([name, label]) => {
+        const set = TRIVIA.find((t) => t.tab === name);
+        return set ? { name, label, render: (panel) => triviaPanel(panel, set, `${INFO}${name}.md`) } : { name, label, readme: `${INFO}${name}.md` };
+      }) });
     syncInfo();
     return infoTabs;
+  }
+  // A trivia tab: the question under way (Trivia.card), then the tab's commands and the set's README.
+  function triviaPanel(panel, set, readme) {
+    const cardSlot = el("div");
+    panel.append(cardSlot);
+    loadTrivia().then((t) => t.card(cardSlot, set.id)).catch(() => {});
+    [readme, set.readme].forEach((path, i) => {
+      const md = el("div", { class: "pagetabs-readme", id: `infoTabs-${set.tab}-md${i}` });
+      if (i) md.style.marginTop = "28px";
+      panel.append(md);
+      if (typeof window.loadMarkdown === "function") window.loadMarkdown(path, md.id, "_parent", 1);
+      else fetch(path).then((r) => (r.ok ? r.text() : "")).then((text) => md.append(el("pre", { text })));
+    });
+  }
+  // js/trivia.js, loaded once, with TRIVIA's sets. A question asked opens its set's tab.
+  function loadTrivia() {
+    trivia ||= (window.Trivia ? Promise.resolve() : new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = SCRIPT ? new URL("trivia.js", SCRIPT).href : "/engine/js/trivia.js";
+      s.onload = resolve;
+      s.onerror = () => reject(new Error(`${s.src} didn't load`));
+      document.head.append(s);
+    })).then(() => {
+      TRIVIA.forEach((t) => window.Trivia.add(t));
+      document.addEventListener("trivia:change", (e) => {
+        const set = e.detail?.question && TRIVIA.find((t) => t.id === e.detail.quiz?.set?.id);
+        if (set && (!commandsShown() || infoTabs.selected !== set.tab)) showCommands(set.tab).catch(() => {});
+        if (e.detail?.music === "start") hideCommands();
+        showMusic();
+      });
+      return window.Trivia;
+    });
+    trivia.catch(() => { trivia = null; });
+    return trivia;
   }
   const commandsShown = () => !!infoTabs?.isOpen() && !document.documentElement.classList.contains("mapoverlayHidden");
   function syncInfo() {
@@ -315,8 +382,16 @@
     syncInfo();
     return set;
   }
+  // The ⓘ: info=voices in the hash (localsite.js goHash), which opens the Voices tab.
+  async function showVoicesTab() {
+    const set = await commands();
+    if (typeof window.goHash === "function") window.goHash({ info: "voices" });
+    if (!commandsShown() || set.selected !== "voices") set.open("voices");
+    syncInfo();
+  }
+  // Closed, they stay in localsite's mini nav pill, as its expand icon.
   function hideCommands() {
-    infoTabs?.close();
+    if (infoTabs?.isOpen()) { infoTabs.close(); window.miniNavClosed?.(infoTabs.el); }
     syncInfo();
   }
 
@@ -343,9 +418,10 @@
       inputSchema: none,
       execute: () => { voicesAsked = false; endVoices(); return "The voice buttons are hidden."; },
     });
+    window.Trivia?.registerTools();
     register({
       name: "show_commands",
-      description: "Shows what the person can ask the page to do, in tabs over the left of the page: Weather (the Earth map's wind, temperatures, ocean currents and more), Voices (choosing who speaks) and Locations. Use for \"Show commands\", \"What can I say?\", \"Help\" or similar, with the tab that fits what they asked about.",
+      description: "Shows what the person can ask the page to do, in tabs over the left of the page: Weather (the Earth map's wind, temperatures, ocean currents and more), Voices (choosing who speaks), Locations and Music (Georgia music trivia). Use for \"Show commands\", \"What can I say?\", \"Help\" or similar, with the tab that fits what they asked about.",
       inputSchema: { type: "object", properties: { tab: { type: "string", enum: INFO_TABS.map(([name]) => name), description: "The tab to show. Leave it out for the one shown last, else Weather." } }, additionalProperties: false },
       execute: async ({ tab } = {}) => {
         const set = await showCommands(tab);
@@ -354,7 +430,7 @@
     });
     register({
       name: "hide_commands",
-      description: "Closes the commands' tabs (Weather, Voices, Locations), as for \"Hide commands\" or \"Close the commands\".",
+      description: "Closes the commands' tabs (Weather, Voices, Locations, Music), as for \"Hide commands\" or \"Close the commands\".",
       inputSchema: none,
       execute: () => { hideCommands(); return "The commands are closed."; },
     });
@@ -428,10 +504,11 @@
   function arrowKeys(e) {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
     if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
-    if (!area || area.hidden || questions.length < 2) return;
+    if (!area || area.hidden || (!music && questions.length < 2)) return;
     const focus = document.activeElement;
     if (focus && focus !== document.body && focus !== document.documentElement && !area.contains(focus)) return;
     e.preventDefault();
+    if (music) { window.Trivia?.step(e.key === "ArrowRight" ? 1 : -1); return; }
     at = (at + (e.key === "ArrowRight" ? 1 : -1) + questions.length) % questions.length;
     showText(questions[at], true); // At once, without the fade
     // A fresh TALK_MS before the next change on its own.
@@ -464,7 +541,8 @@
   function setState(state) {
     if (!zone) return;
     zone.dataset.state = state;
-    part("hint").textContent = state === "listening" && window.VoiceChat?.listenPaused ? "" : HINTS[state]();
+    part("hint").textContent = music && !talking ? [[music.artist, music.year].filter(Boolean).join(" · "), music.paused && music.src ? "Paused · tap to play" : ""].filter(Boolean).join("\n")
+      : state === "listening" && window.VoiceChat?.listenPaused ? "" : HINTS[state]();
     showLinks();
   }
   // Small while a reply's large words show, at a clear spot (placeSpot); back home at full size after.
@@ -517,7 +595,30 @@
     area.style.setProperty("--talk-dx", `${Math.round(dx)}px`);
     area.style.setProperty("--talk-dy", `${Math.round(dy)}px`);
   }
+  // The song playing, in place of the question: its title, its artist and year as the hint, and the arrows. When the
+  // music stops, the question comes back.
+  function showMusic() {
+    const m = window.Trivia?.music || null;
+    const was = music;
+    music = m;
+    if (!zone) return;
+    zone.toggleAttribute("data-music", !!m);
+    arrows.hidden = !m;
+    if (m) {
+      showText(m.title, true);
+      const source = arrows.querySelector(".talk-circle-source");
+      const src = m.src;
+      source.replaceChildren(src?.link ? el("a", { href: src.link, target: "_blank", rel: "noopener", class: src.kind === "apple" ? "talk-circle-badge" : "",
+        title: src.kind === "apple" ? "Preview courtesy of Apple Music" : "Public domain recording" },
+        ...(src.kind === "apple" ? [el("small", { text: "Listen on" }), "Apple Music"] : [src.label])) : "");
+    } else if (was) {
+      showText(questions[at] || "", true);
+    }
+    setState(zone.dataset.state);
+    syncTimer();
+  }
   function ask() {
+    if (music) { window.Trivia?.toggleMusic(); return; }
     const q = question();
     if (!q) return;
     if (typeof window.VoiceChat?.ask === "function") {
@@ -612,7 +713,7 @@
   }
   // The questions change every TALK_MS while the circle shows, the tab is in view and no conversation is on.
   function syncTimer() {
-    const run = !!area && !area.hidden && !talking && !document.hidden && questions.length > 1;
+    const run = !!area && !area.hidden && !talking && !music && !document.hidden && questions.length > 1;
     if (run && !timer) timer = setInterval(nextQuestion, TALK_MS);
     else if (!run && timer) { clearInterval(timer); timer = null; }
   }
