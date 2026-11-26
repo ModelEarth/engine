@@ -3,7 +3,8 @@
    the voice widget (engine/js/voice-chat.js) ask the question aloud and listen for the answer, and Claude replies
    warmly with a gentle follow-up. Without the voice widget, the browser just reads the question aloud. The left and
    right arrow keys move through the questions (arrowKeys).
-   Styles are in engine/css/talk-circle.css. Used by project/goals (above its tabs) and project/care (centered).
+   Styles are in engine/css/talk-circle.css. Used by project/goals (above its tabs), project/care
+   (centered), engine/index.html and any page whose #fullscreen localsite adds when the Earth map opens (insertFullscreen).
 
    Each folder has its own questions. Two ways to add the circle:
    - Declared: <div data-talk-circle="talk-circle.yaml"></div>, centered in that div, with the questions (and an
@@ -28,12 +29,21 @@
    Before a conversation begins, a row of 2 to 10 voices from the widget (VoiceChat.voices()) shows below the circle as
    toggles: several can be on, and they take turns. Each greets you when it's turned on. The row is one line of up to
    VOICES_ROW (fewer when they don't fit), with those turned on among them, and a + at its right end that shows the rest
-   (and then a − to go back to one line). Once a conversation begins
-   (a tap on the circle, speech or typing), the row goes for good on this page, and voices change in the widget's ⚙
-   panel instead, which shares the same choice. */
+   (and then a − to go back to one line), and an ⓘ after it that shows the voice commands. Once a conversation begins
+   (a tap on the circle, speech or typing), the row hides, and voices change in the widget's ⚙ panel instead, which
+   shares the same choice. Claude can bring the row back (show_voices) until the conversation ends.
+
+   The ⓘ opens the commands: Weather, Voices and Locations tabs over the left 2/3 of #fullscreen (localsite's page tabs,
+   localsite/js/page-tabs.js), each a README from info/ beside this folder, also opened when the person says "Show
+   commands" and closed by the ⓘ, the tabs' × or "Hide commands". With #info=voices (or another tab) in the hash,
+   they open on load. While they're open, the circle moves to the space at their right (placeSide).
+
+   Page actions (localsite.js registerPageTool, run from an action tag in Claude's reply): show_voices, hide_voices,
+   show_commands and hide_commands. set_voices, which turns voices on or off, is the widget's own (voice-chat.js). */
 (function () {
   "use strict";
   if (window.TalkCircle) return;
+  const SCRIPT = document.currentScript?.src || "";
 
   const TALK_MS = 20000; // Each question stays this long
   const TALK_SMALL = 0.4; // The circle's size while the large words show
@@ -81,6 +91,10 @@
   let voicesRow = null, voicesDone = false; // the voice buttons, and whether a conversation has begun (they're gone)
   let voiceList = [], voicesMore = false; // the voices for the row, and whether the + has shown them all
   const VOICES_ROW = 5; // the most voice buttons in the row before the + shows the rest
+  let voicesAsked = false; // Claude showed the row during a conversation (show_voices), so it stays until the conversation ends
+  let infoTabs = null; // The commands' page tabs, once opened
+  const INFO = SCRIPT ? new URL("../info/", SCRIPT).href : "/engine/info/";
+  const INFO_TABS = [["weather", "Weather"], ["voices", "Voices"], ["locations", "Locations"]];
 
   function el(tag, attrs = {}, ...children) {
     const e = document.createElement(tag);
@@ -113,11 +127,13 @@
     voicesRow = el("div", { class: "talk-circle-voices", role: "group", "aria-label": "Voices" });
     voicesRow.hidden = true;
     area.prepend(slot, voicesRow);
+    if (/(^|[#&])info=/.test(location.hash)) commands().catch(() => {});
     if (!area.isConnected) (opts.parent || document.body).append(area);
     // The voice widget's events don't bubble up from its target (#fullscreen), so they're heard capturing.
     document.addEventListener("voice-chat:state", (e) => {
       const st = e.detail?.state;
       watchWords();
+      registerTools(); // Again once localsite.js has registerPageTool, which also offers them to WebMCP
       if (!voicesRow?.childElementCount) showVoices(); // The widget has loaded
       showLinks(); // Not needed once the widget has loaded
       if (st !== "speaking") setSmall(false); // The reply has been spoken, or cut short
@@ -140,6 +156,7 @@
     document.addEventListener("voice-chat:pause", () => { if (zone?.dataset.state === "listening") setState("listening"); }, true);
     document.addEventListener("voice-chat:voices", (e) => showVoices(e.detail?.choices), true);
     document.addEventListener("voice-chat:start", endVoices, true);
+    document.addEventListener("voice-chat:end", () => { if (voicesAsked) { voicesAsked = false; endVoices(); } }, true);
     // The question showing when the conversation ended stays, in full, rather than the one the farewell's small circle
     // offered. A fresh TALK_MS passes before the next one.
     document.addEventListener("voice-chat:end", () => {
@@ -170,6 +187,7 @@
     document.addEventListener("keydown", arrowKeys);
     if (opts.questions) setQuestions(opts.questions);
     else place();
+    registerTools();
     showVoices();
     if (document.readyState !== "complete") window.addEventListener("load", () => showVoices(), { once: true }); // The widget may load after the circle
     return api;
@@ -213,7 +231,7 @@
     if (!voicesRow || voicesDone) return;
     const vc = window.VoiceChat;
     if (typeof vc?.voices !== "function") return;
-    if (["listening", "thinking", "speaking"].includes(vc.state)) return endVoices();
+    if (!voicesAsked && ["listening", "thinking", "speaking"].includes(vc.state)) return endVoices();
     if (!choices) { vc.voices().then((c) => showVoices(c), () => {}); return; }
     const had = !voicesRow.hidden;
     voiceList = choices;
@@ -247,6 +265,11 @@
         more.addEventListener("click", (e) => { e.stopPropagation(); voicesMore = !voicesMore; renderVoices(); place(); });
         buttons.push(more);
       }
+      const info = el("button", { type: "button", class: "talk-circle-voice talk-circle-more talk-circle-info", title: "Commands",
+        "aria-label": "Commands", "aria-controls": "infoTabs", "aria-expanded": String(commandsShown()) });
+      info.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="7" r="1.6" fill="currentColor"/><path d="M12 11v7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>`;
+      info.addEventListener("click", (e) => { e.stopPropagation(); if (commandsShown()) hideCommands(); else showCommands().catch((err) => console.warn(err.message)); });
+      buttons.push(info);
       voicesRow.replaceChildren(...buttons);
       const first = voicesRow.firstElementChild;
       if (voicesMore || limit <= 1 || !first?.offsetHeight || voicesRow.offsetHeight <= first.offsetHeight * 1.5) break;
@@ -255,8 +278,86 @@
   function endVoices() {
     if (voicesDone || !voicesRow) return;
     voicesDone = true;
-    voicesRow.remove();
+    voicesAsked = false;
+    voicesRow.hidden = true;
     place();
+  }
+  // The row again, during a conversation too, for show_voices. Resolves to its voices, or throws why it can't show.
+  async function revealVoices() {
+    const vc = window.VoiceChat;
+    if (!voicesRow || typeof vc?.voices !== "function") throw new Error("The voice buttons aren't on this page");
+    if (area.hidden) throw new Error("The talk circle isn't showing on this page now");
+    const choices = await vc.voices();
+    if (choices.length < 2) throw new Error("Only one voice is available here");
+    voicesDone = false;
+    voicesAsked = true;
+    showVoices(choices);
+    return choices;
+  }
+
+  // The commands' tabs (localsite/js/page-tabs.js, loaded by localsite.js's loadPageTabs the first time), made once.
+  async function commands() {
+    if (infoTabs) return infoTabs;
+    const tabs = window.PageTabs || (typeof window.loadPageTabs === "function" ? await window.loadPageTabs() : null);
+    if (!tabs) throw new Error("The commands need localsite (localsite/js/page-tabs.js)");
+    infoTabs ||= tabs.create({ id: "infoTabs", label: "Commands", hash: "info", onChange: syncInfo, onClose: syncInfo,
+      tabs: INFO_TABS.map(([name, label]) => ({ name, label, readme: `${INFO}${name}.md` })) });
+    syncInfo();
+    return infoTabs;
+  }
+  const commandsShown = () => !!infoTabs?.isOpen() && !document.documentElement.classList.contains("mapoverlayHidden");
+  function syncInfo() {
+    voicesRow?.querySelector(".talk-circle-info")?.setAttribute("aria-expanded", String(commandsShown()));
+  }
+  async function showCommands(tab) {
+    const set = await commands();
+    set.open(tab);
+    syncInfo();
+    return set;
+  }
+  function hideCommands() {
+    infoTabs?.close();
+    syncInfo();
+  }
+
+  // The page actions for the voice buttons and the commands, as MCP tools that Claude runs from an action tag in its
+  // reply (localsite.js registerPageTool, else window.pageTools directly). Registering again replaces them.
+  function registerTools() {
+    const register = typeof window.registerPageTool === "function" ? window.registerPageTool
+      : (t) => { window.pageTools = (Array.isArray(window.pageTools) ? window.pageTools : []).filter((x) => x.name !== t.name).concat(t); };
+    const none = { type: "object", properties: {}, additionalProperties: false };
+    const named = (v) => `${v.name} (${v.source === "browser" ? "Browser" : v.label})`;
+    register({
+      name: "show_voices",
+      description: "Shows the voice buttons below the talk circle, where the person taps a voice to hear it and turn it on. Several can be on, taking turns. Use when they ask to see, hear, choose or change voices. To turn voices on or off yourself, use set_voices.",
+      inputSchema: none,
+      execute: async () => {
+        const choices = await revealVoices();
+        const on = choices.filter((v) => v.on).map(named);
+        return `The voice buttons show below the circle: ${choices.map(named).join(", ")}.${on.length ? ` On now: ${on.join(", ")}.` : ""}`;
+      },
+    });
+    register({
+      name: "hide_voices",
+      description: "Hides the voice buttons below the talk circle, as for \"Hide the voices\".",
+      inputSchema: none,
+      execute: () => { voicesAsked = false; endVoices(); return "The voice buttons are hidden."; },
+    });
+    register({
+      name: "show_commands",
+      description: "Shows what the person can ask the page to do, in tabs over the left of the page: Weather (the Earth map's wind, temperatures, ocean currents and more), Voices (choosing who speaks) and Locations. Use for \"Show commands\", \"What can I say?\", \"Help\" or similar, with the tab that fits what they asked about.",
+      inputSchema: { type: "object", properties: { tab: { type: "string", enum: INFO_TABS.map(([name]) => name), description: "The tab to show. Leave it out for the one shown last, else Weather." } }, additionalProperties: false },
+      execute: async ({ tab } = {}) => {
+        const set = await showCommands(tab);
+        return `The commands show in tabs over the left of the page, on ${set.selected}.`;
+      },
+    });
+    register({
+      name: "hide_commands",
+      description: "Closes the commands' tabs (Weather, Voices, Locations), as for \"Hide commands\" or \"Close the commands\".",
+      inputSchema: none,
+      execute: () => { hideCommands(); return "The commands are closed."; },
+    });
   }
 
   // The large words (.w) arriving in the voice widget's word layer shrink the circle. The layer is
@@ -434,21 +535,39 @@
   // (project/care: the title) is stacked below it and centered with it, so it keeps its place beside the circle.
   function placeCentered() {
     const r = area.getBoundingClientRect();
-    const rest = [...area.children].reduce((h, c) => h + (c === slot ? 0 : c.getBoundingClientRect().height), 0);
+    const rest = [...area.children].reduce((h, c) => {
+      const box = c === slot ? 0 : c.getBoundingClientRect().height;
+      if (!box) return h;
+      const cs = getComputedStyle(c);
+      return h + box + parseFloat(cs.marginTop) + parseFloat(cs.marginBottom);
+    }, 0);
     const d = Math.round(Math.min(r.width - 32, r.height - 32 - rest, TALK_MAX));
     area.style.setProperty("--talk-d", `${d}px`);
     return d >= TALK_MIN;
   }
   // In an area the page sized (opts.place), the voice buttons take their room from the circle, down to TALK_MIN, or
-  // else hide. placeCentered counts them already, with what else is in the area.
+  // else they hide. placeCentered counts them already, with what else is in the area.
+  const shows = (e) => !!e?.isConnected && !e.hidden && e.offsetHeight > 0;
   function fitVoices() {
-    if (!voicesRow?.isConnected || voicesRow.hidden || !opts.place) return true;
-    const h = area.clientHeight, row = voicesRow.offsetHeight + 22;
+    if (!opts.place || pageTabsOpen()) return true;
+    const row = shows(voicesRow) ? voicesRow.offsetHeight + 22 : 0;
+    const h = area.clientHeight;
     const d = parseFloat(area.style.getPropertyValue("--talk-d")) || 0;
-    if (!h || d + row <= h) return true;
+    if (!row || !h || d + row <= h) return true;
     if (h - row >= TALK_MIN) area.style.setProperty("--talk-d", `${Math.floor(h - row)}px`);
-    else voicesRow.hidden = true;
+    else if (shows(voicesRow)) voicesRow.hidden = true;
     return true;
+  }
+  // While page tabs are open over the left 2/3 (localsite/js/page-tabs.js), the circle's area is fixed in the space at
+  // their right (PageTabs.side()), centered there as large as fits. On narrow windows there's no room, and it hides.
+  const pageTabsOpen = () => !!window.PageTabs?.isOpen();
+  function placeSide() {
+    const s = window.PageTabs.side();
+    area.style.setProperty("--talk-top", `${Math.round(s.top)}px`);
+    area.style.setProperty("--talk-left", `${Math.round(s.left)}px`);
+    area.style.setProperty("--talk-w", `${Math.round(s.width)}px`);
+    area.style.setProperty("--talk-h", `${Math.round(s.height)}px`);
+    return s.width > TALK_MIN && placeCentered();
   }
   // The lower-left panel (#beanPanel, localsite.js), while it's open over the page (<html> .beanPanelOpen): its box,
   // which the circle moves up to clear. Its voice buttons hide meanwhile (talk-circle.css).
@@ -477,7 +596,10 @@
     const panel = beanPanel();
     area.classList.toggle("talk-circle-bean", !!panel);
     area.style.removeProperty("--talk-lift");
-    const room = (opts.place || placeCentered)(area) && (panel || fitVoices());
+    const side = pageTabsOpen();
+    area.classList.toggle("talk-circle-side", side);
+    syncInfo();
+    const room = (side ? placeSide : opts.place || placeCentered)(area) && (panel || fitVoices());
     if (room && panel) liftAbove(panel);
     const on = !!room && questions.length > 0;
     if (on) {
@@ -497,14 +619,21 @@
 
   const api = {
     init, setQuestions, load, place, ask,
+    /** The voice buttons again (resolves to the voices, or rejects with why not), or hidden. */
+    showVoices: revealVoices,
+    hideVoices: () => { voicesAsked = false; endVoices(); },
+    /** A Markdown file in the panel below the voice buttons (the voice commands by default), or the panel closed. */
+    showCommands, hideCommands,
     get count() { return questions.length; },
     get state() { return zone?.dataset.state || ""; },
   };
   window.TalkCircle = api;
 
   // A div marked data-talk-circle="<file>.yaml" gets the circle, centered, with that file's questions. With
-  // data-talk-local too, only on localhost or with view=local in the URL, as localsite shows its .local elements.
-  const localView = () => location.host.includes("localhost") || [location.search, location.hash].some((p) => new URLSearchParams(p.slice(1)).get("view") === "local");
+  // data-talk-local too, only on localhost, with view=local in the URL, or in localsite's dev mode (the devmode cookie, set in
+  // Settings), as localsite.js agentsLocal() allows the voice widget.
+  const localView = () => typeof window.agentsLocal === "function" ? window.agentsLocal()
+    : location.host.includes("localhost") || [location.search, location.hash].some((p) => new URLSearchParams(p.slice(1)).get("view") === "local");
   function auto() {
     const host = document.querySelector("[data-talk-circle]");
     if (!host || zone) return;

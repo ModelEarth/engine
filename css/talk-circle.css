@@ -69,6 +69,11 @@
 /* The + at the row's end that shows the rest of the voices, and then the − that goes back to one line (talk-circle.js renderVoices). */
 .talk-circle-voice.talk-circle-more { align-self: center; align-items: center; justify-content: center; box-sizing: border-box; width: 34px; height: 34px; padding: 0; border-radius: 50%; }
 .talk-circle-voice.talk-circle-more svg { display: block; }
+.talk-circle-voice.talk-circle-info[aria-expanded="true"] { border-color: rgba(150, 215, 255, 0.95); box-shadow: inset 0 0 0 1px rgba(150, 215, 255, 0.95), 0 0 10px rgba(90, 170, 255, 0.45); }
+/* While page tabs are open over the left 2/3 of #fullscreen (localsite/js/page-tabs.js), the area is fixed in the space
+   at their right (talk-circle.js placeSide), over a page's own placing of it. */
+.talk-circle-area.talk-circle-side { position: fixed !important; right: auto !important; bottom: auto !important; left: var(--talk-left) !important; top: var(--talk-top) !important;
+  width: var(--talk-w) !important; height: var(--talk-h) !important; padding: 0 !important; z-index: 102; }
 /* Links to the page where Claude can answer, below the hint when the voice widget isn't loaded (talk-circle.js showLinks). */
 .talk-circle-links { margin-top: -0.3em; font-size: 16px; line-height: 1.4; color: rgba(255, 255, 255, 0.85); text-wrap: balance; }
 .talk-circle-links a { color: #fff; text-decoration: underline; text-underline-offset: 2px; }

@@ -2398,6 +2398,58 @@
     ui.setVoiceMode(voiceMode);
     ui.setVoiceInfo(voiceMode, shownVoice(curVoice), on.size);
     emit('voices', { choices: voiceChoices(), pool: [...on] });
+    registerVoiceTool();
+  }
+
+  // set_voices, a page action (localsite.js registerPageTool, else window.pageTools; run from an action tag in Claude's
+  // reply): turns voices on or off by name, as the ⚙ panel's Voices do. Its names are the panel's voices that can speak
+  // here, "Name (Source)", registered again whenever they or the ones on change.
+  function registerVoiceTool() {
+    const on = poolIds();
+    const list = serverVoices().filter(usableVoice)
+      .concat(englishVoices().filter((v) => voiceTier(v) <= 1).slice(0, 8).map(browserVoice))
+      .concat(on.filter((id) => id.startsWith('browser:')).map(voiceById).filter(Boolean));
+    const voices = [...new Map(list.map((v) => [v.id, v])).values()].slice(0, 80);
+    if (!voices.length) return;
+    const named = (v) => `${v.name} (${v.label || 'Browser'})`;
+    const names = voices.map(named);
+    const onNow = on.map(voiceById).filter(Boolean).map(named);
+    let description = `Turns the voices that speak your replies on or off, as the person asks ("Use Bella", "Add a British voice", "Just George", "Turn off Eve"). Several can be on, taking turns. Your next sentences are in the new voice. On now: ${onNow.join(', ') || 'none'}.`;
+    for (const v of voices) {
+      const line = v.note ? ` ${named(v)}: ${v.note}.` : '';
+      if (line && description.length + line.length < 1450) description += line;
+    }
+    const register = typeof window.registerPageTool === 'function' ? window.registerPageTool
+      : (t) => { window.pageTools = (Array.isArray(window.pageTools) ? window.pageTools : []).filter((x) => x.name !== t.name).concat(t); };
+    register({
+      name: 'set_voices',
+      description,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          on: { type: 'array', items: { type: 'string', enum: names }, description: 'Voices to turn on' },
+          off: { type: 'array', items: { type: 'string', enum: names }, description: 'Voices to turn off' },
+          only: { type: 'boolean', description: 'true: the voices in on become the only ones on' },
+        },
+        additionalProperties: false,
+      },
+      execute: async (input = {}) => {
+        const find = (n) => {
+          const s = String(n).trim().toLowerCase();
+          return voices.find((v) => named(v).toLowerCase() === s) || voices.find((v) => v.name.toLowerCase() === s);
+        };
+        const ids = (list) => (Array.isArray(list) ? list : list ? [list] : []).map((n) => {
+          const v = find(n);
+          if (!v) throw new Error(`Unknown voice "${n}". Use one of: ${names.join(', ')}`);
+          return v.id;
+        });
+        const turnOn = ids(input.on), turnOff = ids(input.off), before = poolIds();
+        const pool = input.only ? turnOn : before.filter((id) => !turnOff.includes(id)).concat(turnOn.filter((id) => !before.includes(id)));
+        await setVoicePool(pool);
+        const now = poolIds().map(voiceById).filter(Boolean).map(named);
+        return now.length ? `Voices on now: ${now.join(', ')}.` : 'No voices are on, so the browser’s best voices take turns.';
+      },
+    });
   }
 
   // 2 to 10 quality voices for the buttons below a Talk Circle: the default source's best, a couple from each other

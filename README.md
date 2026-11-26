@@ -11,7 +11,8 @@ engine/                        ← this submodule, inside your webroot
   js/voice-chat.js             ← the only file the page loads
   js/voice-audio.js            ← plays the natural voices (imported only when one speaks)
   js/voice-kokoro.js           ← Kokoro in the browser (imported only when it's chosen)
-  js/talk-circle.js            ← the Talk Circle, with its voice buttons
+  js/talk-circle.js            ← the Talk Circle, with its voice buttons and commands
+  info/                        ← what people can say: weather.md, voices.md and locations.md, a tab each (the ⓘ beside the voice buttons)
   demo.html
   shared/                      ← system prompt + Claude API streaming (used by both servers)
   shared/tts/                  ← the voice services, one module each (see "Voices")
@@ -183,7 +184,9 @@ The files are kept in the browser's storage for the site, so restarting the brow
 
 **Keys.** Keyed sources use the server's key from the env file (pushed to the Worker with `node engine/server/push-secrets.mjs --voices`), or the visitor's own key from the Keys page: an xAI key for Grok, an OpenAI key for OpenAI, and ElevenLabs and Google Cloud Text-to-Speech keys. A source with neither is listed in the ⚙ panel under **With a key**. On the deployed site, a source using the site's key or the AI binding needs the team passphrase, as a conversation does. The Worker keeps each sentence's audio in the Cache API, so a greeting or a repeated reply costs nothing the second time.
 
-**Choosing voices.** Below a Talk Circle (`js/talk-circle.js`), 2 to 10 voices show as buttons before a conversation begins: the default source's best, a couple from each other source and the browser's best. Once the conversation begins, the buttons go, and the ⚙ panel's **Voices** list has every voice, grouped by source, plus **More Browser Voices**. Both change the same choice, which is remembered in the browser (`voice-chat:pool` in localStorage):
+**Commands.** The ⓘ after the voice buttons opens what people can say, in Weather, Voices and Locations tabs over the left 2/3 of the page (localsite's page tabs, `localsite/js/page-tabs.js`), each a README from `info/`. "Show commands" (show_commands) opens them too, "Hide commands" closes them, and a link with `#info=voices` (or another tab) opens on that tab. While they're open, the circle moves to the space at their right. Their ◀ minimizes them to localsite's mini nav pill, as clicking or playing the Earth map does.
+
+**Choosing voices.** Below a Talk Circle (`js/talk-circle.js`), 2 to 10 voices show as buttons before a conversation begins: the default source's best, a couple from each other source and the browser's best. Once the conversation begins, the buttons hide (Claude brings them back when asked: show_voices), and the ⚙ panel's **Voices** list has every voice, grouped by source, plus **More Browser Voices**. Both change the same choice, which is remembered in the browser (`voice-chat:pool` in localStorage):
 - Turning a voice on has it greet you by name, as usual for its language and region: "Hi, I'm Heart." (US English), "Hello, I'm George." (UK), "G'day, I'm Theia." (Australia), "¡Hola, soy Celeste!" (Spanish).
 - With one voice on, it speaks every reply.
 - With several on, they take turns, and Claude picks the voice for each reply. Each question tells Claude which voices are on, with their accents and styles, and Claude's hidden header for the reply names one as `speaker`. Claude prefers a voice whose accent belongs to the place the question is about, such as a British English voice for a question about England. Otherwise it picks by the reply's delivery style: `warm`, `bright`, `calm`, `authoritative`, `playful` or `storyteller` (`VOICE_STYLES` in `shared/voice-prompt.js`). When the header names no voice that's on, the style picks one, never the one just used. Only voices that are on are used: with only an American voice on, a question about England is still answered in it. **Take Turns** can change voice for each conversation instead (`data-voice-mode="random"`).
