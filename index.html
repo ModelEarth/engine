@@ -455,7 +455,8 @@ tbody tr td:nth-child(2) {
 <body>
 <!-- #fullscreen (localsite/css/base.css): the window's height below the header. localsite's showGlobalMap()
      puts the Earth map (#mainEarthDisplay) in it, with this play/pause button at its lower right.
-     On localhost or in dev mode only (data-voice="local", localsite.js agentsLocal()), localsite.js adds the voice widget's controls in its lower right, and the
+     On localhost, in dev mode or on a site with a backend for Claude's replies, such as cloud.model.earth
+     (data-voice="local", localsite.js agentsLocal()), localsite.js adds the voice widget's controls in its lower right, and the
      talk circle (data-talk-local, js/talk-circle.js) shows over the map with the questions in talk-circle.yaml. -->
 <div id="fullscreen" style="position:relative" data-voice="local">
 <div id="earthPlayPauseButton" class="earthPlay playPauseButton" role="button" tabindex="0" title="Play" aria-label="Play"><i class="material-icons play-pause-icon" aria-hidden="true">play_arrow</i></div>

@@ -9,7 +9,7 @@
    Each folder has its own questions. Two ways to add the circle:
    - Declared: <div data-talk-circle="talk-circle.yaml"></div>, centered in that div, with the questions (and an
      optional context for Claude) from the .yaml file beside the page. Add data-talk-local to show it only on
-     localhost (engine/index.html). The page links css/talk-circle.css for its styles:
+     localhost and the sites with a backend for Claude's replies, such as cloud.model.earth (engine/index.html). The page links css/talk-circle.css for its styles:
        context: "How Claude replies..."   (optional, else TALK_CONTEXT below)
        questions:
          - text: "What's a song you love?"
@@ -224,11 +224,13 @@
   }
 
   // Without the voice widget (no backend for the page's site), the circle can only read its question aloud, so
-  // below its hint it links to the same page where Claude can answer: the local CloudRoot Worker on port 3701
-  // when it's running (AGENTS.md), and neighborhood.org, or else neighborhood.org and cloud.model.earth.
-  // Only on a local page: on public sites the hint shows alone.
+  // below its hint it links to where Claude can answer. On a local page, that's the same page on the local CloudRoot
+  // Worker on port 3701 when it's running (AGENTS.md), and neighborhood.org, or else neighborhood.org and
+  // cloud.model.earth. On a public site without a backend (localsite.js agentsBackend()), it's cloud.model.earth.
   const LOCAL_PORT = 3701;
   const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || location.hostname.endsWith(".localhost");
+  const backend = () => typeof window.agentsBackend === "function" ? window.agentsBackend()
+    : ["cloud.model.earth", "neighborhood.org"].includes(location.hostname.replace(/^www\./, ""));
   let portUp = null;
   function portCheck() {
     if (portUp) return portUp;
@@ -240,14 +242,15 @@
   function showLinks() {
     const links = part("links");
     if (!links) return;
-    if (!local || zone.dataset.state !== "idle" || typeof window.VoiceChat?.ask === "function") { links.replaceChildren(); return; }
+    if (zone.dataset.state !== "idle" || (music && !talking) || typeof window.VoiceChat?.ask === "function" || (!local && backend())) { links.replaceChildren(); return; }
     const path = location.pathname + location.search + location.hash;
     // A tap on a link follows it, without the circle asking its question too.
-    const link = (origin, label) => {
-      const a = el("a", { href: origin + path, text: label });
+    const link = (origin, label, href = origin + path) => {
+      const a = el("a", { href, text: label });
       a.addEventListener("click", (e) => e.stopPropagation());
       return a;
     };
+    if (!local) { links.replaceChildren("Visit ", link("", "cloud.model.earth", "https://cloud.model.earth"), " to interact"); return; }
     portCheck().then((up) => {
       if (zone.dataset.state !== "idle" || typeof window.VoiceChat?.ask === "function") return;
       links.replaceChildren(...(up
@@ -731,10 +734,10 @@
   window.TalkCircle = api;
 
   // A div marked data-talk-circle="<file>.yaml" gets the circle, centered, with that file's questions. With
-  // data-talk-local too, only on localhost, with view=local in the URL, or in localsite's dev mode (the devmode cookie, set in
-  // Settings), as localsite.js agentsLocal() allows the voice widget.
+  // data-talk-local too, only on localhost, with view=local in the URL, in localsite's dev mode (the devmode cookie, set in
+  // Settings), or on a site with a backend for Claude's replies, as localsite.js agentsLocal() allows the voice widget.
   const localView = () => typeof window.agentsLocal === "function" ? window.agentsLocal()
-    : location.host.includes("localhost") || [location.search, location.hash].some((p) => new URLSearchParams(p.slice(1)).get("view") === "local");
+    : location.host.includes("localhost") || backend() || [location.search, location.hash].some((p) => new URLSearchParams(p.slice(1)).get("view") === "local");
   function auto() {
     const host = document.querySelector("[data-talk-circle]");
     if (!host || zone) return;
